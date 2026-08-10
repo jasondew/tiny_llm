@@ -1,0 +1,357 @@
+# Attention, From Scratch
+
+```elixir
+Mix.install([
+  {:kino_vega_lite, "~> 0.1"},
+  {:tiny_llm, path: Path.join(__DIR__, "..")}
+])
+```
+
+## What this is
+
+A complete decoder-only transformer language model in pure Elixir standard
+library. No Nx, no Axon, no hex packages in the model code. Hand-derived
+backpropagation. About thirteen thousand parameters, trained on a laptop CPU
+in under a minute.
+
+This notebook is the talk, in talk order. Kino and VegaLite appear here for
+*presentation only*; they never touch the math.
+
+**Built so far: stages 1 and 2.** The vocabulary, the grammar that writes our
+training data, the math library, and a count-based bigram. The bigram is the
+baseline the transformer has to beat, and by the end of this notebook you will
+be able to see exactly where it fails and why.
+
+```elixir
+alias TinyLlm.Bigram
+alias TinyLlm.Grammar
+alias TinyLlm.Tensor
+alias TinyLlm.Vocab
+alias VegaLite, as: Vl
+
+indented = fn lines -> Kino.Markdown.new(Enum.map_join(lines, "\n", &("    " <> &1))) end
+
+:ok
+```
+
+## The entire vocabulary
+
+Thirty-two words. One word is one token is one integer. There is no
+tokenizer anywhere in this project, which means there is nothing hidden
+between the text you read and the numbers the model sees.
+
+The ordering is deliberate: every word class occupies a contiguous range of
+ids. That choice pays off the moment we draw a picture.
+
+```elixir
+[
+  {"determiners", Vocab.determiners()},
+  {"nouns", Vocab.nouns()},
+  {"transitive verbs", Vocab.transitive_verbs()},
+  {"intransitive verbs", Vocab.intransitive_verbs()},
+  {"copula", Vocab.copula()},
+  {"adjectives", Vocab.adjectives()},
+  {"connectives", Vocab.connectives()},
+  {"boundaries", [Vocab.start_token(), Vocab.end_token()]}
+]
+|> Enum.map(fn {class, words} ->
+  ids = Enum.map(words, &Vocab.word_to_id/1)
+
+  %{
+    "class" => class,
+    "ids" => "#{Enum.min(ids)}-#{Enum.max(ids)}",
+    "words" => Enum.join(words, " ")
+  }
+end)
+|> Kino.DataTable.new(name: "32 words, grouped by class")
+```
+
+A word is only ever its id, and back again:
+
+```elixir
+sentence = ~w(the big llama sees a mouse .)
+
+%{
+  words: sentence,
+  ids: Vocab.encode(sentence),
+  back_again: sentence |> Vocab.encode() |> Vocab.decode()
+}
+```
+
+## We own the training data
+
+Most of what makes language models hard to study is that nobody knows what is
+in the training set. So we write ours with a probabilistic grammar, which makes
+the ground truth knowable: we can ask whether the model learned subject-verb
+agreement, rather than guessing.
+
+```
+Sentence        -> NounPhrase VerbPhrase "."
+
+NounPhrase      -> Determiner AdjectivePhrase Noun (70%)
+                 | NounPhrase "and" NounPhrase (15%)
+                 | Determiner AdjectivePhrase Noun "who" VerbPhrase (15%)
+
+AdjectivePhrase -> nothing (55%)
+                 | Adjective (30%)
+                 | Adjective Adjective (15%)
+
+VerbPhrase      -> IntransitiveVerb (35%)
+                 | TransitiveVerb NounPhrase (35%)
+                 | Copula Adjective (30%)
+```
+
+Agreement is enforced while sampling, so every sentence is grammatical by
+construction. A singular-or-plural flag is decided once, when a noun phrase
+picks its noun, then travels up to the caller and back down into the verb.
+
+```elixir
+Grammar.seed(42)
+
+Grammar.corpus(12)
+|> Enum.map(&Enum.join(&1, " "))
+|> indented.()
+```
+
+### The sentence this whole talk is about
+
+Fifteen percent of subjects take a relative clause, which puts a **distractor
+noun** between the subject and its verb. The verb still has to agree with the
+head noun, not with the thing sitting next to it.
+
+Read the number on the main verb, then look back at which noun it agrees with.
+It is never the closest one.
+
+```elixir
+Grammar.seed(1234)
+
+Grammar.corpus(5_000)
+|> Enum.filter(&("who" in &1))
+|> Enum.take(10)
+|> Enum.map(&Enum.join(&1, " "))
+|> indented.()
+```
+
+## A bigram: the dumbest model that works
+
+Count which word follows which, normalize each row, sample. No parameters
+learned by gradient descent, no notion of a subject, and no memory beyond one
+word back.
+
+```elixir
+Grammar.seed(20_250_807)
+
+corpus = Grammar.corpus(2_000)
+counts = Bigram.counts(corpus)
+matrix = Bigram.matrix(counts)
+
+%{
+  sentences: length(corpus),
+  distinct_pairs_observed: map_size(counts),
+  possible_pairs: Vocab.size() * Vocab.size(),
+  matrix_shape: "#{length(matrix)} x #{length(hd(matrix))}"
+}
+```
+
+### The heatmap
+
+Row = the word you just saw. Column = the word that comes next. Each row is a
+probability distribution, so each row sums to 1.
+
+Both axes are the full vocabulary in id order, which is why the grammar's rules
+show up as **blocks** rather than as noise.
+
+```elixir
+words = Vocab.words()
+
+cells =
+  for {row, previous_id} <- Enum.with_index(matrix),
+      {probability, next_id} <- Enum.with_index(row) do
+    %{
+      "previous" => Vocab.id_to_word(previous_id),
+      "next" => Vocab.id_to_word(next_id),
+      "probability" => probability
+    }
+  end
+
+Vl.new(width: 620, height: 620, title: "P(next word | previous word)")
+|> Vl.data_from_values(cells)
+|> Vl.mark(:rect)
+|> Vl.encode_field(:x, "next",
+  type: :nominal,
+  sort: words,
+  axis: [title: "next word", label_angle: -45]
+)
+|> Vl.encode_field(:y, "previous",
+  type: :nominal,
+  sort: words,
+  axis: [title: "previous word"]
+)
+|> Vl.encode_field(:color, "probability",
+  type: :quantitative,
+  scale: [scheme: "blues"]
+)
+```
+
+### Reading it
+
+Every bright block is a grammar rule you can point at. These are checks, not
+claims:
+
+```elixir
+successors = fn word ->
+  matrix
+  |> Enum.at(Vocab.word_to_id(word))
+  |> Enum.with_index()
+  |> Enum.reject(fn {probability, _id} -> probability == 0.0 end)
+  |> Enum.map(fn {_probability, id} -> Vocab.id_to_word(id) end)
+  |> Enum.sort()
+end
+
+[Vocab.start_token(), "is", "are", "sees", "chases"]
+|> Enum.map(fn word -> %{"after" => word, "can only be followed by" => Enum.join(successors.(word), " ")} end)
+|> Kino.DataTable.new(name: "the grammar, visible in the counts")
+```
+
+`<start>` is followed only by determiners, because every sentence begins with
+one. The copula is followed only by adjectives, which is `Copula Adjective`
+with nothing else possible. Transitive verbs are followed only by determiners,
+because they always take an object noun phrase.
+
+And two white stripes mark the sequence boundaries: nothing precedes `<start>`,
+so its column is empty, and nothing follows `.`, so its row is empty.
+
+```elixir
+%{
+  "start token column (nothing precedes a start)" =>
+    matrix |> Enum.map(&Enum.at(&1, Vocab.word_to_id(Vocab.start_token()))) |> Enum.sum(),
+  "period row (nothing follows an end)" =>
+    matrix |> Enum.at(Vocab.word_to_id(Vocab.end_token())) |> Enum.sum(),
+  "distinct sums of every other row" =>
+    matrix
+    |> Enum.map(&Enum.sum/1)
+    |> Enum.reject(&(&1 == 0.0))
+    |> Enum.map(&Float.round(&1, 12))
+    |> Enum.uniq()
+}
+```
+
+### Where the bigram wins
+
+Here is the surprise. The bigram gets adjacent agreement **mostly right, for
+free**, with no notion of number anywhere in it. After a singular noun it
+expects a singular verb; after a plural noun, a plural one. It learned that
+purely from counting.
+
+```elixir
+singular_verbs = ~w(sees chases ignores flees is)
+plural_verbs = ~w(see chase ignore flee are)
+
+verb_mass = fn word ->
+  entries =
+    matrix
+    |> Enum.at(Vocab.word_to_id(word))
+    |> Enum.with_index()
+    |> Enum.map(fn {probability, id} -> {probability, Vocab.id_to_word(id)} end)
+
+  mass = fn forms ->
+    entries |> Enum.filter(fn {_p, w} -> w in forms end) |> Enum.map(&elem(&1, 0)) |> Enum.sum()
+  end
+
+  {mass.(singular_verbs), mass.(plural_verbs)}
+end
+
+~w(llama llamas dog dogs mouse mice)
+|> Enum.map(fn word ->
+  {singular, plural} = verb_mass.(word)
+  agreeing = if word in Vocab.nouns(:plural), do: plural, else: singular
+
+  %{
+    "after" => word,
+    "singular verb mass" => Float.round(singular, 3),
+    "plural verb mass" => Float.round(plural, 3),
+    "share that agrees" => "#{Float.round(agreeing / (singular + plural) * 100, 1)}%"
+  }
+end)
+|> Kino.DataTable.new(name: "verb mass following each noun")
+```
+
+### Where it cannot
+
+Look at the share that *disagrees*. It is not noise, and it is not evenly
+spread. It is exactly the two constructions in our grammar that break
+adjacency:
+
+* A plural verb after a **singular** noun comes from a compound subject:
+  `the goose and the llama flee`. The pair `llama flee` is real.
+* A singular verb after a **plural** noun comes from a relative clause:
+  `the llama who chases the dogs flees`. The pair `dogs flees` is real, and
+  that sentence is the distractor case itself.
+
+So the disagreeing mass in each row is a fingerprint of the very sentences the
+bigram cannot handle. Restricted to the two candidate forms, here is what it
+answers after `dogs`:
+
+```elixir
+{singular, plural} = verb_mass.("dogs")
+
+%{
+  "context" => "the llama who chases the dogs ___",
+  "correct answer" => "singular, agreeing with llama",
+  "bigram answers plural with confidence" => "#{Float.round(plural / (singular + plural) * 100, 1)}%",
+  "single most likely next token overall" =>
+    matrix |> Enum.at(Vocab.word_to_id("dogs")) |> Tensor.argmax() |> Vocab.id_to_word()
+}
+```
+
+The bigram conditions on one word, and that word is `dogs`. It will answer
+plural essentially every time, and it will be wrong essentially every time.
+
+```
+the llama who chases the dogs ___
+                      ^^^^        the only thing a bigram can see
+    ^^^^^                         the only thing that matters
+```
+
+It does not fail at agreement in general. It fails **precisely and only** when
+a distractor sits between a subject and its verb, because there is no row in
+this matrix for "the subject, four words ago."
+
+That missing row is what attention is for.
+
+### What it generates
+
+Sample from the start row, follow the chain, stop at a period.
+
+Every adjacent pair below is locally plausible, because every adjacent pair was
+observed. The sentences are still nonsense, because nothing tracks a subject
+for longer than one word.
+
+```elixir
+Bigram.seed(7)
+
+1..12
+|> Enum.map(fn _draw -> matrix |> Bigram.sentence() |> Enum.join(" ") end)
+|> indented.()
+```
+
+## Still to come
+
+The remaining stages, each of which slots in below this line:
+
+* **Stage 3, the neural bigram.** Same one-word context, but the counts become
+  learned parameters: an embedding, a projection, a softmax, and cross-entropy
+  loss with a hand-derived gradient. Loss starts at `ln(32) ~ 3.466` and should
+  fall below 2.
+* **Stage 4, attention.** One causal self-attention head over the whole
+  16-token context. Learned positional embeddings, scaled dot-product scores, a
+  causal mask, and a backward pass derived by hand in `docs/backprop.md`.
+* **Stage 5, the block.** Residual connections, RMSNorm, and a 32 to 128 to 32
+  MLP, composed into a model.
+* **Stage 6, sampling and evaluation.** A temperature knob, and the numbers
+  that settle the argument: agreement accuracy for the bigram, the neural
+  bigram, and the full model, measured on held-out `who`-clause sentences.
+* **Stage 7, the pictures.** Embedding PCA, expecting part-of-speech clusters
+  and parallel singular-to-plural offsets, plus the attention heatmap for
+  `the llama who chases the dogs`, where the verb position should attend to
+  `llama` and not to `dogs`.
