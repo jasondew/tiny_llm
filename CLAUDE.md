@@ -45,8 +45,11 @@ refactor them except to add functions.
   no JSON dep) → `priv/exports/`.
 - Every module gets a `@moduledoc` explaining the *concept*, not just the
   API — moduledocs are talk material.
-- Tests in `test/dayN_test.exs` matching stages. `mix test` stays green at
-  every stage boundary.
+- Tests mirror `lib/`: `test/tiny_llm/vocab_test.exs` covers
+  `lib/tiny_llm/vocab.ex`. Helpers shared across test files live in
+  `test/support` and re-derive their facts from the brief rather than
+  importing them from `lib/`. `mix test` stays green at every stage
+  boundary.
 - **Gradient checking is mandatory.** Every hand-written backward pass gets
   a finite-difference test: `(f(θ+ε) − f(θ−ε)) / 2ε`, ε ≈ 1.0e-4, relative
   error < 1.0e-3, run on a tiny config. Implement once in `TinyLlm.GradCheck`

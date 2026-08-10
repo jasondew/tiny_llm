@@ -6,15 +6,22 @@ Durable rules that outlive the build live in `CLAUDE.md`.
 
 Stage status is tracked by what's in `lib/` and `test/`, not here.
 
+Amended once, before any implementation existed: seven surface words were
+swapped for livelier ones (`cat/cats` to `llama/llamas`, `bird/birds` to
+`goose/geese`, `eats/eat` to `ignores/ignore`, `sleeps/sleep` to
+`flees/flee`, `happy` to `grumpy`, `old` to `sleepy`). Counts, word
+classes, and every rule are unchanged. The vocabulary is closed again now
+that training is about to start.
+
 ## Stage 1a. `TinyLlm.Vocab` (~30 lines)
 
 Exactly these 32 words, in this order (ids 0–31):
 
     the a
-    cat cats dog dogs bird birds fox foxes mouse mice
-    sees see chases chase eats eat sleeps sleep
+    llama llamas dog dogs goose geese fox foxes mouse mice
+    sees see chases chase ignores ignore flees flee
     is are
-    big small hungry happy fast old
+    big small hungry grumpy fast sleepy
     and then who
     .
 
@@ -25,30 +32,43 @@ One word = one token = one integer; there is no tokenizer anywhere.
 
 ## Stage 1b. `TinyLlm.Grammar` (~90 lines)
 
-PCFG corpus generator:
+Probabilistic context-free corpus generator:
 
-    S    -> NP VP "."
-    NP   -> Det AdjP N
-          | NP "and" NP          (subject position only; result :pl)
-          | Det AdjP N "who" VP  (subject position only; VP agrees with head N)
-    AdjP -> [] (55%) | Adj (30%) | Adj Adj (15%)
-    VP   -> V (35%) | Vt NP (35%) | Cop Adj (30%)
+    Sentence        -> NounPhrase VerbPhrase "."
 
-Word classes: nouns sg `cat dog bird fox mouse` / pl `cats dogs birds foxes
-mice`; verbs sg `sees chases eats sleeps` / pl `see chase eat sleep`;
-transitive only `sees/chases/eats` + plural forms (never "sleeps NP");
-copula is/are; adjectives `big small hungry happy fast old`.
+    NounPhrase      -> Determiner AdjectivePhrase Noun (70%)
+                     | NounPhrase "and" NounPhrase (15%)
+                           (subject position only; result :plural)
+                     | Determiner AdjectivePhrase Noun "who" VerbPhrase (15%)
+                           (subject position only; verb agrees with head noun)
+
+    AdjectivePhrase -> nothing (55%)
+                     | Adjective (30%)
+                     | Adjective Adjective (15%)
+
+    VerbPhrase      -> IntransitiveVerb (35%)
+                     | TransitiveVerb NounPhrase (35%)
+                     | Copula Adjective (30%)
+
+Word classes: nouns singular `llama dog goose fox mouse` / plural `llamas
+dogs geese foxes mice`; verbs singular `sees chases ignores flees` /
+plural `see chase ignore flee`;
+transitive only `sees/chases/ignores` + plural forms (never "flees" followed
+by an object noun phrase);
+copula is/are; adjectives `big small hungry grumpy fast sleepy`.
 
 Rules enforced at sampling time, so every sentence is grammatical by
 construction:
-- a `:sg | :pl` number flag threads from subject NP into its VP
-- relative-clause VP agrees with the **head** noun (the distractor-object
-  case `the cat who chases the dogs sleeps` is the talk's centerpiece)
-- compound subjects (`X and Y`) are `:pl`
+- a `:singular | :plural` number flag threads from the subject noun phrase
+  into its verb phrase
+- a relative-clause verb agrees with the **head** noun (the distractor-object
+  case `the llama who chases the dogs flees` is the talk's centerpiece)
+- compound subjects (`X and Y`) are `:plural`
 - `"a"` only before singular nouns (`"the"` works for both)
-- compound/relative NPs only in subject position (depth 0); object NPs simple
+- compound and relative noun phrases only in subject position (depth 0);
+  object noun phrases are always simple
 - sentences ≤ 16 tokens (resample stragglers), always ending `"."`
-- rel-clause probability 15%, compound 15% at subject position
+- relative-clause probability 15%, compound 15% at subject position
 
 API: `seed/1`, `sentence/0`, `corpus/1`.
 **Accept:** over 10k seeded sentences — all tokens in vocab, all end `"."`,
@@ -126,18 +146,19 @@ majority of generated sentences are both unseen and grammatical.
 ## Stage 7. `TinyLlm.Export` + `TinyLlm.PCA` + Livebook
 
 Exports (JSON): embeddings, attention maps for probe sentences (must
-include `the cat who chases the dogs`), per-step next-token distributions
+include `the llama who chases the dogs`), per-step next-token distributions
 for a sample generation, loss curves. PCA = power iteration on the
 covariance matrix (~20 lines, stdlib, first two components).
 
 `notebooks/attention_from_scratch.livemd` — the talk's demo vehicle, cells
 in talk order: corpus gen → bigram heatmap → train with live loss chart →
-embedding PCA scatter (expect POS clusters + parallel sg→pl offsets) →
+embedding PCA scatter (expect POS clusters + parallel singular→plural
+offsets) →
 probe-sentence attention heatmap → temperature slider (Kino.Control) with
 per-step probability bars.
 **Accept:** Livebook runs top-to-bottom on a fresh machine with only
 Livebook installed; the probe heatmap shows the verb position attending to
-the subject noun (`cat`), not the distractor (`dogs`).
+the subject noun (`llama`), not the distractor (`dogs`).
 
 ## Definition of done
 
