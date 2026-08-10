@@ -110,6 +110,34 @@ defmodule TinyLlm.TensorTest do
              [[27.0, 30.0, 33.0], [61.0, 68.0, 75.0], [95.0, 106.0, 117.0]]
   end
 
+  test "normalizes each row to sum to one" do
+    assert Tensor.normalize([[1.0, 3.0], [2.0, 2.0]]) == [[0.25, 0.75], [0.5, 0.5]]
+  end
+
+  test "normalizes rows independently of one another" do
+    assert Tensor.normalize([[1.0, 1.0], [1.0, 3.0]]) == [[0.5, 0.5], [0.25, 0.75]]
+  end
+
+  test "leaves a row that already sums to one unchanged" do
+    assert Tensor.normalize([[0.25, 0.75]]) == [[0.25, 0.75]]
+  end
+
+  test "normalizes a row holding a zero entry" do
+    assert Tensor.normalize([[0.0, 2.0, 2.0]]) == [[0.0, 0.5, 0.5]]
+  end
+
+  test "leaves an all zero row alone rather than dividing by zero" do
+    assert Tensor.normalize([[0.0, 0.0, 0.0]]) == [[0.0, 0.0, 0.0]]
+  end
+
+  test "normalizes only the empty rows it is given, leaving the rest alone" do
+    assert Tensor.normalize([[0.0, 0.0], [1.0, 3.0]]) == [[0.0, 0.0], [0.25, 0.75]]
+  end
+
+  test "normalizes an empty matrix into an empty matrix" do
+    assert Tensor.normalize([]) == []
+  end
+
   test "softmaxes each row to sum to one" do
     for row <- Tensor.softmax([[1.0, 2.0, 3.0], [-1.0, 0.0, 1.0]]) do
       assert_in_delta Enum.sum(row), 1.0, 1.0e-12
@@ -151,5 +179,72 @@ defmodule TinyLlm.TensorTest do
 
   test "breaks argmax ties toward the first index" do
     assert Tensor.argmax([0.5, 0.5, 0.1]) == 0
+  end
+
+  describe "weighted_random_index/1" do
+    test "always returns the only index carrying any weight" do
+      for _draw <- 1..200 do
+        assert Tensor.weighted_random_index([0.0, 1.0, 0.0]) == 1
+      end
+    end
+
+    test "always returns 0 for a single entry row" do
+      for _draw <- 1..50 do
+        assert Tensor.weighted_random_index([1.0]) == 0
+      end
+    end
+
+    test "never returns an index whose weight is zero" do
+      drawn =
+        1..2_000
+        |> Enum.map(fn _draw -> Tensor.weighted_random_index([0.5, 0.0, 0.5, 0.0]) end)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      assert drawn == [0, 2]
+    end
+
+    test "draws each index about as often as its weight" do
+      :rand.seed(:exsss, {1, 2, 3})
+
+      counts =
+        1..10_000
+        |> Enum.map(fn _draw -> Tensor.weighted_random_index([0.2, 0.3, 0.5]) end)
+        |> Enum.frequencies()
+
+      assert_in_delta counts[0] / 10_000, 0.2, 0.02
+      assert_in_delta counts[1] / 10_000, 0.3, 0.02
+      assert_in_delta counts[2] / 10_000, 0.5, 0.02
+    end
+
+    test "weights raw counts the same as the probabilities they normalize to" do
+      :rand.seed(:exsss, {4, 5, 6})
+      from_counts = Enum.map(1..5_000, fn _draw -> Tensor.weighted_random_index([2.0, 8.0]) end)
+
+      :rand.seed(:exsss, {4, 5, 6})
+
+      from_probabilities =
+        Enum.map(1..5_000, fn _draw -> Tensor.weighted_random_index([0.2, 0.8]) end)
+
+      assert from_counts == from_probabilities
+    end
+
+    test "draws the same indices twice from the same seed" do
+      :rand.seed(:exsss, {7, 8, 9})
+      first = Enum.map(1..100, fn _draw -> Tensor.weighted_random_index([0.3, 0.3, 0.4]) end)
+
+      :rand.seed(:exsss, {7, 8, 9})
+      second = Enum.map(1..100, fn _draw -> Tensor.weighted_random_index([0.3, 0.3, 0.4]) end)
+
+      assert first == second
+    end
+
+    test "refuses a row that weights nothing" do
+      assert_raise ArgumentError, fn -> Tensor.weighted_random_index([0.0, 0.0, 0.0]) end
+    end
+
+    test "refuses an empty row" do
+      assert_raise ArgumentError, fn -> Tensor.weighted_random_index([]) end
+    end
   end
 end

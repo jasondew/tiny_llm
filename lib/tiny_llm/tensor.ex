@@ -129,6 +129,25 @@ defmodule TinyLlm.Tensor do
   end
 
   @doc """
+  Each row divided by its own sum, so every row becomes a distribution.
+
+  This is the other way to turn a row into probabilities, and the one to
+  reach for when the entries are already counts rather than logits.
+
+  A row summing to zero is returned untouched. There is no distribution to
+  normalize it to, and dividing would turn an honestly empty row into a row
+  of NaNs.
+  """
+  @spec normalize(matrix()) :: matrix()
+  def normalize(matrix) do
+    for row <- matrix do
+      sum = Enum.sum(row)
+
+      if sum == 0, do: row, else: Enum.map(row, &(&1 / sum))
+    end
+  end
+
+  @doc """
   Each row of a matrix turned into a probability distribution.
 
   Subtracts the row maximum before exponentiating, which changes nothing
@@ -156,6 +175,42 @@ defmodule TinyLlm.Tensor do
       |> Enum.max_by(fn {entry, _index} -> entry end)
 
     max_index
+  end
+
+  @doc """
+  An index drawn at random, each entry weighted by its own value.
+
+  The stochastic sibling of `argmax/1`: same input, same kind of output,
+  but `[0.7, 0.3]` returns 0 about seven times in ten rather than always.
+  Stage 6's temperature knob interpolates between the two, and at `T = 0`
+  this collapses into `argmax/1`.
+
+  Weights, not probabilities. The draw is scaled by the row's own total,
+  which buys two things: the row need not already sum to 1, so raw counts
+  sample correctly without normalizing first; and the draw can never land
+  above the last cumulative value, so there is no float-drift gap where
+  nothing matches.
+
+  Raises on a row summing to zero, which weights nothing. The period's row
+  in a bigram matrix is exactly that, so this catches a sampler that has
+  walked somewhere it should not.
+  """
+  @spec weighted_random_index(row()) :: non_neg_integer()
+  def weighted_random_index([]) do
+    raise(ArgumentError, "cannot sample from an empty row")
+  end
+
+  def weighted_random_index(row) do
+    cumulative_weights = Enum.scan(row, &+/2)
+    total = List.last(cumulative_weights)
+
+    if total == 0 do
+      raise ArgumentError, "cannot sample from a row that sums to zero"
+    end
+
+    draw = :rand.uniform() * total
+
+    Enum.find_index(cumulative_weights, &(&1 >= draw))
   end
 
   ## PRIVATE FUNCTIONS

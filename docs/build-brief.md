@@ -6,12 +6,19 @@ Durable rules that outlive the build live in `CLAUDE.md`.
 
 Stage status is tracked by what's in `lib/` and `test/`, not here.
 
-Amended once, before any implementation existed: seven surface words were
-swapped for livelier ones (`cat/cats` to `llama/llamas`, `bird/birds` to
-`goose/geese`, `eats/eat` to `ignores/ignore`, `sleeps/sleep` to
-`flees/flee`, `happy` to `grumpy`, `old` to `sleepy`). Counts, word
-classes, and every rule are unchanged. The vocabulary is closed again now
-that training is about to start.
+Amended twice. First, before any implementation existed, seven surface
+words were swapped for livelier ones (`cat/cats` to `llama/llamas`,
+`bird/birds` to `goose/geese`, `eats/eat` to `ignores/ignore`,
+`sleeps/sleep` to `flees/flee`, `happy` to `grumpy`, `old` to `sleepy`).
+
+Second, at stage 2, the unused word `then` was replaced by an explicit
+`<start>` marker, so sequences begin the way real models begin them
+rather than by reusing the period. `<start>` is never emitted by the
+grammar; whatever consumes sentences prepends it. The period keeps its
+job as the terminator, so no second marker is needed.
+
+Both amendments preserve the 32 word count and every rule. The
+vocabulary is closed.
 
 ## Stage 1a. `TinyLlm.Vocab` (~30 lines)
 
@@ -22,8 +29,8 @@ Exactly these 32 words, in this order (ids 0–31):
     sees see chases chase ignores ignore flees flee
     is are
     big small hungry grumpy fast sleepy
-    and then who
-    .
+    and who
+    <start> .
 
 One word = one token = one integer; there is no tokenizer anywhere.
 `word_to_id/1` / `id_to_word/1` as compile-time generated function clauses;
@@ -89,9 +96,9 @@ rows sum to 1 and survive logits of 1000.
 ## Stage 2. `TinyLlm.Bigram` (~40 lines)
 
 Count-based bigram: `%{ {prev_id, next_id} => count }` built from a corpus;
-row-normalize to sample. Export the 32×32 count matrix (JSON) for the talk's
-heatmap slide.
-**Accept:** samples end `"."`; exported rows sum to ~1.
+row-normalize to sample. The 32×32 matrix is returned as plain lists and
+feeds the talk's heatmap slide directly.
+**Accept:** samples end `"."`; matrix rows sum to ~1.
 
 ## Stage 3. `TinyLlm.Embedder` + `TinyLlm.Train` (~150 lines)
 
@@ -100,16 +107,16 @@ next-token from current token only. Cross-entropy loss. Backward:
 `dlogits = softmax − one_hot`, chained through the projection.
 Train harness (shared with stage 5 via a config struct): mini-batches from
 `Grammar.corpus/1`, plain SGD, loss logged every N steps, seedable, loss
-history exported.
+history returned.
 **Accept:** gradient check passes; loss starts ≈ ln(32) ≈ 3.466 and drops
-below 2.0 within seconds; embedding matrix exported.
+below 2.0 within seconds.
 
 ## Stage 4. `TinyLlm.Attention` (~150 lines) — the hard one
 
 Single causal self-attention head over the full context: learned positional
 embeddings added to token embeddings; Wq/Wk/Wv/Wo; scores = QKᵀ/√d; causal
 mask = −1.0e9 on future positions pre-softmax; per-position attention
-weights retrievable for export.
+weights retrievable.
 
 Forward AND hand-derived backward. **Write the derivation in
 `docs/backprop.md` before implementing** — it doubles as a backup slide.
@@ -143,11 +150,13 @@ Eval — three checks that produce the talk's numbers:
 **Accept:** Model beats Embedder and Bigram on (a) by a wide margin;
 majority of generated sentences are both unseen and grammatical.
 
-## Stage 7. `TinyLlm.Export` + `TinyLlm.PCA` + Livebook
+## Stage 7. `TinyLlm.PCA` + Livebook
 
-Exports (JSON): embeddings, attention maps for probe sentences (must
-include `the llama who chases the dogs`), per-step next-token distributions
-for a sample generation, loss curves. PCA = power iteration on the
+Everything the Livebook plots is a plain Elixir term the model already
+returns: embeddings, attention maps for probe sentences (must include
+`the llama who chases the dogs`), per-step next-token distributions for a
+sample generation, loss curves. There is no serialization step; the
+notebook shares a BEAM with the model. PCA = power iteration on the
 covariance matrix (~20 lines, stdlib, first two components).
 
 `notebooks/attention_from_scratch.livemd` — the talk's demo vehicle, cells
@@ -164,6 +173,6 @@ the subject noun (`llama`), not the distractor (`dogs`).
 
 `mix test` green including every gradient check; a `mix run` demo script
 prints 10 seeded sentences and the eval table (agreement accuracy ×3,
-% unseen, % grammatical); all exports written; Livebook verified.
+% unseen, % grammatical); Livebook verified.
 When in doubt about scope: smaller and clearer wins — this codebase's job
 is to fit in someone's head.
