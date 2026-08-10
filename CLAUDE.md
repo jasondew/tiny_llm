@@ -23,7 +23,8 @@ refactor them except to add functions.
 1. **Zero dependencies.** No Nx, no Axon, no hex packages in model code.
    `mix.exs` deps stay empty. The point of the project is that nothing is
    hidden. (Sole exception: the stage-7 Livebook may use Kino/VegaLite for
-   *presentation* — it visualizes JSON the model exports, never the math.)
+   *presentation* — it visualizes the plain Elixir terms the model returns,
+   never the math.)
 2. **Hand-written backprop.** No autodiff, no numerical-only training.
    Gradients are derived analytically and implemented explicitly.
 3. **Clarity beats performance.** Matrices are lists of lists of floats.
@@ -40,9 +41,10 @@ refactor them except to add functions.
 
 - Params are maps of named matrices, e.g. `%{e: E, wq: Wq, ...}`. Training
   is `Enum.reduce(batches, params, &step/2)` — params in, params out.
-- Checkpoints: `:erlang.term_to_binary/1` → `priv/checkpoints/`.
-  Visual exports: hand-rolled JSON encoder (~30 lines, in `TinyLlm.Export`;
-  no JSON dep) → `priv/exports/`.
+- Checkpoints: `:erlang.term_to_binary/1` → `priv/checkpoints/`. There is no
+  serialization layer beyond that. The Livebook runs in the same BEAM as the
+  model, so it calls the public functions and hands the lists it gets back
+  straight to VegaLite. Adding JSON would be a round trip to nowhere.
 - Every module gets a `@moduledoc` explaining the *concept*, not just the
   API — moduledocs are talk material.
 - Tests mirror `lib/`: `test/tiny_llm/vocab_test.exs` covers
