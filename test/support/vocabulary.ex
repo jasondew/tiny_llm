@@ -13,8 +13,8 @@ defmodule TinyLlm.Test.Vocabulary do
     sees see chases chase ignores ignore flees flee
     is are
     big small hungry grumpy fast sleepy
-    and then who
-    .
+    and who
+    <start> .
   )
 
   @doc """

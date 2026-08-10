@@ -42,10 +42,24 @@ defmodule TinyLlm.Vocab do
   @copula @singular_copula ++ @plural_copula
 
   @adjectives ~w(big small hungry grumpy fast sleepy)
-  @connectives ~w(and then who)
-  @period ~w(.)
+  @connectives ~w(and who)
 
-  @words Enum.concat([@determiners, @nouns, @verbs, @copula, @adjectives, @connectives, @period])
+  # Boundary markers rather than words. Nothing precedes the start and
+  # nothing follows the end, so on a transition heatmap the start has an
+  # empty column and the end has an empty row.
+  @start_token "<start>"
+  @end_token "."
+  @boundaries [@start_token, @end_token]
+
+  @words Enum.concat([
+           @determiners,
+           @nouns,
+           @verbs,
+           @copula,
+           @adjectives,
+           @connectives,
+           @boundaries
+         ])
 
   @spec determiners() :: [word()]
   def determiners, do: @determiners
@@ -92,6 +106,18 @@ defmodule TinyLlm.Vocab do
 
   @spec connectives() :: [word()]
   def connectives, do: @connectives
+
+  @doc """
+  The marker every sequence begins with. Never emitted by the grammar.
+  """
+  @spec start_token() :: word()
+  def start_token, do: @start_token
+
+  @doc """
+  The marker every sentence ends with, which is also an ordinary period.
+  """
+  @spec end_token() :: word()
+  def end_token, do: @end_token
 
   @doc """
   Every word in the vocabulary, in id order.
