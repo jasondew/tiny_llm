@@ -255,19 +255,28 @@ And two white stripes mark the sequence boundaries: nothing precedes `<start>`,
 so its column is empty, and nothing follows `.`, so its row is empty.
 
 ```elixir
+row_sums = Enum.map(matrix, &Enum.sum/1)
+distributions = Enum.reject(row_sums, &(&1 == 0.0))
+
 %{
-  "start token column (nothing precedes a start)" =>
+  "start token column, nothing precedes a start" =>
     matrix |> Enum.map(&Enum.at(&1, Vocab.word_to_id(Vocab.start_token()))) |> Enum.sum(),
-  "period row (nothing follows an end)" =>
-    matrix |> Enum.at(Vocab.word_to_id(Vocab.end_token())) |> Enum.sum(),
-  "distinct sums of every other row" =>
-    matrix
-    |> Enum.map(&Enum.sum/1)
-    |> Enum.reject(&(&1 == 0.0))
-    |> Enum.map(&Float.round(&1, 12))
-    |> Enum.uniq()
+  "empty rows, nothing follows an end" => Enum.count(row_sums, &(&1 == 0.0)),
+  "rows that are probability distributions" => length(distributions),
+  "of those, summing to exactly 1.0" => Enum.count(distributions, &(&1 == 1.0)),
+  "largest deviation from 1.0" =>
+    distributions |> Enum.map(&abs(&1 - 1.0)) |> Enum.max()
 }
 ```
+
+Note that not every row sums to *exactly* 1.0. Nine of them are one unit in
+the last place away, about `2.2e-16`, because adding thirty-two floats in a
+different order gives a slightly different answer.
+
+That is worth seeing rather than rounding away. It is why the tests compare
+row sums with a tolerance instead of `==`, and it is the same reason the
+gradient checks in stage 3 onward will use relative error rather than exact
+equality. Hand-written numerics live with this everywhere.
 
 ### Where the bigram wins
 
