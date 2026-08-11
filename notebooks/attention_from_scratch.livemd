@@ -113,22 +113,55 @@ Grammar.corpus(12)
 
 ### The sentence this whole talk is about
 
-Fifteen percent of subjects take a relative clause, which puts a **distractor
-noun** between the subject and its verb. The verb still has to agree with the
-head noun, not with the thing sitting next to it.
+```
+the llama who chases the dogs flees
+    ^^^^^                     ^^^^^   subject and verb, both singular
+                      ^^^^            distractor: plural, and nearest the verb
+```
 
-Read the number on the main verb, then look back at which noun it agrees with.
-It is never the closest one.
+Fifteen percent of subjects take a relative clause, which drops a **distractor
+noun** between the subject and its verb. The verb still has to agree with the
+head noun, `llama`, and not with `dogs` sitting right beside it.
+
+Anything predicting agreement from the nearest noun answers `flee` and is
+wrong. Getting this right means knowing that `llama` is the subject and `dogs`
+is merely the object of a subordinate clause. That is the entire task.
+
+Linguists call this **agreement attraction**, and it is a standard probe for
+whether a model has learned syntax or surface statistics. Humans fail it too:
+"the key to the cabinets *were* rusty" is an error fluent speakers produce.
+
+The grammar generates this shape constantly, and it is easy to find because a
+plural noun immediately followed by a singular verb can only happen when that
+verb agrees with something further back:
 
 ```elixir
+singular_verbs =
+  Vocab.transitive_verbs(:singular) ++
+    Vocab.intransitive_verbs(:singular) ++ Vocab.copula(:singular)
+
+distractor_case? = fn words ->
+  words
+  |> Enum.chunk_every(2, 1, :discard)
+  |> Enum.any?(fn [first, second] ->
+    first in Vocab.nouns(:plural) and second in singular_verbs
+  end)
+end
+
 Grammar.seed(1234)
 
-Grammar.corpus(5_000)
-|> Enum.filter(&("who" in &1))
-|> Enum.take(10)
+Grammar.corpus(20_000)
+|> Enum.filter(distractor_case?)
+|> Enum.take(8)
 |> Enum.map_join("\n", &Enum.join(&1, " "))
 |> Kino.Text.new()
 ```
+
+Every one of those is a sentence where the last noun before the verb disagrees
+with it. They are rare, about 1.3% of the corpus, which matters later: the
+stage 6 evaluation has to be scored on these specifically. Score it on all
+relative clauses instead and a model guessing from the nearest noun collects
+roughly half the points by accident.
 
 ## A bigram: the dumbest model that works
 
