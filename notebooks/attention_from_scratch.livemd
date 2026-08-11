@@ -69,11 +69,11 @@ A word is only ever its id, and back again:
 ```elixir
 sentence = ~w(the big llama sees a mouse .)
 
-%{
+[
   words: sentence,
   ids: Vocab.encode(sentence),
   back_again: sentence |> Vocab.encode() |> Vocab.decode()
-}
+]
 ```
 
 ## We own the training data
@@ -176,12 +176,12 @@ corpus = Grammar.corpus(2_000)
 counts = Bigram.counts(corpus)
 matrix = Bigram.matrix(counts)
 
-%{
+[
   sentences: length(corpus),
   distinct_pairs_observed: map_size(counts),
   possible_pairs: Vocab.size() * Vocab.size(),
   matrix_shape: "#{length(matrix)} x #{length(hd(matrix))}"
-}
+]
 ```
 
 ### The heatmap
@@ -258,15 +258,16 @@ so its column is empty, and nothing follows `.`, so its row is empty.
 row_sums = Enum.map(matrix, &Enum.sum/1)
 distributions = Enum.reject(row_sums, &(&1 == 0.0))
 
-%{
-  "start token column, nothing precedes a start" =>
-    matrix |> Enum.map(&Enum.at(&1, Vocab.word_to_id(Vocab.start_token()))) |> Enum.sum(),
-  "empty rows, nothing follows an end" => Enum.count(row_sums, &(&1 == 0.0)),
-  "rows that are probability distributions" => length(distributions),
-  "of those, summing to exactly 1.0" => Enum.count(distributions, &(&1 == 1.0)),
-  "largest deviation from 1.0" =>
-    distributions |> Enum.map(&abs(&1 - 1.0)) |> Enum.max()
-}
+[
+  {"start token column, nothing precedes a start",
+   matrix |> Enum.map(&Enum.at(&1, Vocab.word_to_id(Vocab.start_token()))) |> Enum.sum()},
+  {"empty rows, nothing follows an end", Enum.count(row_sums, &(&1 == 0.0))},
+  {"rows that are probability distributions", length(distributions)},
+  {"of those, summing to exactly 1.0", Enum.count(distributions, &(&1 == 1.0))},
+  {"largest deviation from 1.0", distributions |> Enum.map(&abs(&1 - 1.0)) |> Enum.max()}
+]
+|> Enum.map(fn {measure, value} -> %{"measure" => measure, "value" => value} end)
+|> Kino.DataTable.new(name: "every row is a distribution, except one")
 ```
 
 Note that not every row sums to *exactly* 1.0. Nine of them are one unit in
@@ -337,14 +338,16 @@ answers after `dogs`:
 ```elixir
 {singular, plural} = verb_mass.("dogs")
 
-%{
-  "context" => "the llama who chases the dogs ___",
-  "correct answer" => "singular, agreeing with llama",
-  "bigram answers plural with confidence" =>
-    "#{Float.round(plural / (singular + plural) * 100, 1)}%",
-  "single most likely next token overall" =>
-    matrix |> Enum.at(Vocab.word_to_id("dogs")) |> Tensor.argmax() |> Vocab.id_to_word()
-}
+[
+  {"context", "the llama who chases the dogs ___"},
+  {"correct answer", "singular, agreeing with llama"},
+  {"bigram answers plural with confidence",
+   "#{Float.round(plural / (singular + plural) * 100, 1)}%"},
+  {"single most likely next token overall",
+   matrix |> Enum.at(Vocab.word_to_id("dogs")) |> Tensor.argmax() |> Vocab.id_to_word()}
+]
+|> Enum.map(fn {measure, value} -> %{"measure" => measure, "value" => value} end)
+|> Kino.DataTable.new(name: "what the bigram answers after 'dogs'")
 ```
 
 The bigram conditions on one word, and that word is `dogs`. It will answer
