@@ -29,8 +29,6 @@ alias TinyLlm.Tensor
 alias TinyLlm.Vocab
 alias VegaLite, as: Vl
 
-indented = fn lines -> Kino.Markdown.new(Enum.map_join(lines, "\n", &("    " <> &1))) end
-
 :ok
 ```
 
@@ -109,8 +107,8 @@ picks its noun, then travels up to the caller and back down into the verb.
 Grammar.seed(42)
 
 Grammar.corpus(12)
-|> Enum.map(&Enum.join(&1, " "))
-|> indented.()
+|> Enum.map_join("\n", &Enum.join(&1, " "))
+|> Kino.Text.new()
 ```
 
 ### The sentence this whole talk is about
@@ -128,8 +126,8 @@ Grammar.seed(1234)
 Grammar.corpus(5_000)
 |> Enum.filter(&("who" in &1))
 |> Enum.take(10)
-|> Enum.map(&Enum.join(&1, " "))
-|> indented.()
+|> Enum.map_join("\n", &Enum.join(&1, " "))
+|> Kino.Text.new()
 ```
 
 ## A bigram: the dumbest model that works
@@ -209,7 +207,9 @@ successors = fn word ->
 end
 
 [Vocab.start_token(), "is", "are", "sees", "chases"]
-|> Enum.map(fn word -> %{"after" => word, "can only be followed by" => Enum.join(successors.(word), " ")} end)
+|> Enum.map(fn word ->
+  %{"after" => word, "can only be followed by" => Enum.join(successors.(word), " ")}
+end)
 |> Kino.DataTable.new(name: "the grammar, visible in the counts")
 ```
 
@@ -298,7 +298,8 @@ answers after `dogs`:
 %{
   "context" => "the llama who chases the dogs ___",
   "correct answer" => "singular, agreeing with llama",
-  "bigram answers plural with confidence" => "#{Float.round(plural / (singular + plural) * 100, 1)}%",
+  "bigram answers plural with confidence" =>
+    "#{Float.round(plural / (singular + plural) * 100, 1)}%",
   "single most likely next token overall" =>
     matrix |> Enum.at(Vocab.word_to_id("dogs")) |> Tensor.argmax() |> Vocab.id_to_word()
 }
@@ -331,8 +332,8 @@ for longer than one word.
 Bigram.seed(7)
 
 1..12
-|> Enum.map(fn _draw -> matrix |> Bigram.sentence() |> Enum.join(" ") end)
-|> indented.()
+|> Enum.map_join("\n", fn _draw -> matrix |> Bigram.sentence() |> Enum.join(" ") end)
+|> Kino.Text.new()
 ```
 
 ## Still to come
