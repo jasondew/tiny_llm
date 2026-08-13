@@ -41,32 +41,6 @@ defmodule TinyLlm.GradCheck do
   @guard 1.0e-8
 
   @doc """
-  The largest relative error for each named parameter matrix.
-
-  Perturbs every entry of every matrix twice, so cost grows with the total
-  parameter count. Use the smallest config that still exercises the shapes.
-
-  ## Options
-
-    * `:epsilon` - the nudge, defaulting to `#{@default_epsilon}`.
-  """
-  @spec check(module(), Train.params(), [Train.example()], keyword()) :: %{atom() => float()}
-  def check(_model, _params, _batch, _opts \\ []), do: raise("TODO: stage 3")
-
-  @doc """
-  The worst relative error across every parameter, as one number.
-  """
-  @spec max_relative_error(module(), Train.params(), [Train.example()], keyword()) :: float()
-  def max_relative_error(_model, _params, _batch, _opts \\ []), do: raise("TODO: stage 3")
-
-  @doc """
-  The relative difference between two numbers, guarded against dividing by
-  zero when both gradients are legitimately tiny.
-  """
-  @spec relative_error(float(), float()) :: float()
-  def relative_error(_analytic, _numeric), do: raise("TODO: stage 3")
-
-  @doc """
   The default nudge used when no `:epsilon` option is given.
   """
   @spec default_epsilon() :: float()
@@ -77,4 +51,61 @@ defmodule TinyLlm.GradCheck do
   """
   @spec guard() :: float()
   def guard, do: @guard
+
+  @doc """
+  The largest relative error for each named parameter matrix.
+
+  Perturbs every entry of every matrix twice, so cost grows with the total
+  parameter count. Use the smallest config that still exercises the shapes.
+
+  ## Options
+
+    * `:epsilon` - the nudge, defaulting to `#{@default_epsilon}`.
+  """
+  @spec check(module(), Train.params(), [Train.example()], keyword()) :: %{atom() => float()}
+  def check(model, params, batch, opts \\ []) do
+    epsilon = Keyword.get(opts, :epsilon, @default_epsilon)
+    analytics = model.gradients(params, batch)
+
+    for {key, matrix} <- analytics, into: %{} do
+      row_count = length(matrix)
+      column_count = length(hd(matrix))
+
+      max_error =
+        for row <- 0..(row_count - 1), column <- 0..(column_count - 1) do
+          plus = model.loss(perturb(params, key, row, column, +epsilon), batch)
+          minus = model.loss(perturb(params, key, row, column, -epsilon), batch)
+          numeric = (plus - minus) / (2 * epsilon)
+          analytic = get_in(matrix, [Access.at(row), Access.at(column)])
+
+          relative_error(analytic, numeric)
+        end
+        |> Enum.max()
+
+      {key, max_error}
+    end
+  end
+
+  @doc """
+  The worst relative error across every parameter, as one number.
+  """
+  @spec max_relative_error(module(), Train.params(), [Train.example()], keyword()) :: float()
+  def max_relative_error(model, params, batch, opts \\ []) do
+    check(model, params, batch, opts) |> Map.values() |> Enum.max()
+  end
+
+  @doc """
+  The relative difference between two numbers, guarded against dividing by
+  zero when both gradients are legitimately tiny.
+  """
+  @spec relative_error(float(), float()) :: float()
+  def relative_error(analytic, numeric) do
+    abs(analytic - numeric) / max(abs(analytic) + abs(numeric), guard())
+  end
+
+  ## PRIVATE FUNCTIONS
+
+  defp perturb(params, key, row, column, delta) do
+    update_in(params, [key, Access.at(row), Access.at(column)], &(&1 + delta))
+  end
 end

@@ -7,8 +7,8 @@ defmodule TinyLlm.EmbedderTest do
   The brief fixes the architecture but not every shape, so these tests
   assume:
 
-    * params are `%{embedding: E, projection: W}`, with `E` sized
-      `vocabulary_size` by `hidden_size` and `W` the transpose of that
+    * params are `%{embeddings: E, projection: W}`, with `E` sized
+      `vocabulary_size` by `d_model` and `W` the transpose of that
       shape, so the two are separate rather than tied. Stage 5 revisits
       tying and is asked to document its choice.
     * `forward/2` takes one input id and returns a probability row.
@@ -18,11 +18,6 @@ defmodule TinyLlm.EmbedderTest do
 
   use ExUnit.Case, async: true
 
-  # TEMPORARY: skipped until TinyLlm.GradCheck is implemented, since the
-  # acceptance criterion for these gradients is that the checker agrees with
-  # them. Delete this line to bring them back.
-  @moduletag :skip
-
   alias TinyLlm.Embedder
   alias TinyLlm.GradCheck
   alias TinyLlm.Grammar
@@ -30,18 +25,18 @@ defmodule TinyLlm.EmbedderTest do
   alias TinyLlm.Train
   alias TinyLlm.Vocab
 
-  @config %Train.Config{model: Embedder, vocabulary_size: 32, hidden_size: 32}
-  @tiny %Train.Config{model: Embedder, vocabulary_size: 5, hidden_size: 3}
+  @config %Train.Config{model: Embedder, vocabulary_size: 32, d_model: 32}
+  @tiny %Train.Config{model: Embedder, vocabulary_size: 5, d_model: 3}
 
   defp id(word), do: Vocab.word_to_id(word)
 
   describe "init/1" do
-    test "builds an embedding and a projection of the configured shape" do
+    test "builds embeddings and a projection of the configured shape" do
       Train.seed(1)
       params = Embedder.init(@tiny)
 
-      assert Map.keys(params) |> Enum.sort() == [:embedding, :projection]
-      assert Tensor.shape(params.embedding) == {5, 3}
+      assert Map.keys(params) |> Enum.sort() == [:embeddings, :projection]
+      assert Tensor.shape(params.embeddings) == {5, 3}
       assert Tensor.shape(params.projection) == {3, 5}
     end
 
@@ -59,7 +54,7 @@ defmodule TinyLlm.EmbedderTest do
       Train.seed(1)
       params = Embedder.init(@config)
 
-      for value <- List.flatten(params.embedding) ++ List.flatten(params.projection) do
+      for value <- List.flatten(params.embeddings) ++ List.flatten(params.projection) do
         assert abs(value) <= 0.02
       end
     end
@@ -139,7 +134,7 @@ defmodule TinyLlm.EmbedderTest do
       confident = Embedder.gradients(params, batch)
 
       improved = %{
-        embedding: Tensor.sub(params.embedding, Tensor.scale(confident.embedding, 1.0)),
+        embeddings: Tensor.sub(params.embeddings, Tensor.scale(confident.embeddings, 1.0)),
         projection: Tensor.sub(params.projection, Tensor.scale(confident.projection, 1.0))
       }
 
@@ -158,7 +153,7 @@ defmodule TinyLlm.EmbedderTest do
       gradients = Embedder.gradients(params, batch)
 
       assert Map.keys(gradients) == Map.keys(params)
-      assert Tensor.shape(gradients.embedding) == Tensor.shape(params.embedding)
+      assert Tensor.shape(gradients.embeddings) == Tensor.shape(params.embeddings)
       assert Tensor.shape(gradients.projection) == Tensor.shape(params.projection)
     end
 
@@ -167,7 +162,7 @@ defmodule TinyLlm.EmbedderTest do
       gradients = Embedder.gradients(params, batch)
 
       touched =
-        gradients.embedding
+        gradients.embeddings
         |> Enum.with_index()
         |> Enum.reject(fn {row, _index} -> Enum.all?(row, &(&1 == 0.0)) end)
         |> Enum.map(fn {_row, index} -> index end)

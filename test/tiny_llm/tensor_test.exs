@@ -95,6 +95,38 @@ defmodule TinyLlm.TensorTest do
     assert Tensor.dot([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]) == 32.0
   end
 
+  describe "outer_product/2" do
+    test "pairs every entry of one row with every entry of the other" do
+      assert Tensor.outer_product([2.0, 3.0, 5.0], [7.0, 11.0]) ==
+               [[14.0, 22.0], [21.0, 33.0], [35.0, 55.0]]
+    end
+
+    test "is as tall as the left row and as wide as the right" do
+      assert Tensor.shape(Tensor.outer_product([1.0, 2.0, 3.0], [4.0, 5.0])) == {3, 2}
+    end
+
+    test "agrees with the long way round through matmul and transpose" do
+      left = [0.5, -1.5, 2.0]
+      right = [3.0, 0.25, -4.0, 1.0]
+
+      assert Tensor.outer_product(left, right) ==
+               Tensor.matmul(Tensor.transpose([left]), [right])
+    end
+
+    test "transposes into the outer product of the same rows the other way" do
+      left = [2.0, 3.0, 5.0]
+      right = [7.0, 11.0]
+
+      assert Tensor.transpose(Tensor.outer_product(left, right)) ==
+               Tensor.outer_product(right, left)
+    end
+
+    test "contracts to nothing when either row is empty" do
+      assert Tensor.outer_product([], [1.0, 2.0]) == []
+      assert Tensor.outer_product([1.0, 2.0], []) == [[], []]
+    end
+  end
+
   test "multiplies a 2x3 by a 3x2 into a 2x2" do
     left = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
     right = [[7.0, 8.0], [9.0, 10.0], [11.0, 12.0]]

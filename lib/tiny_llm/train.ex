@@ -2,11 +2,6 @@ defmodule TinyLlm.Train do
   @moduledoc """
   The training harness: mini-batches, plain SGD, and a loss history.
 
-  TODO(stage 3): write the concept paragraph. It should say that training is
-  `Enum.reduce(batches, params, &step/2)` and nothing more exotic, and that
-  the same harness trains the neural bigram at stage 3 and the full
-  transformer at stage 5 because both are just "params in, params out".
-
   ## The model contract
 
   A model is any module implementing the callbacks below. Train knows how to
@@ -28,19 +23,20 @@ defmodule TinyLlm.Train do
 
     defstruct model: nil,
               vocabulary_size: 32,
-              hidden_size: 32,
+              d_model: 32,
               context_length: 16,
               learning_rate: 0.5,
               batch_size: 64,
               steps: 1_000,
               log_every: 100,
-              corpus_size: 2_000,
+              training_corpus_size: 2_000,
+              evaluation_corpus_size: 500,
               seed: 1234
 
     @type t :: %__MODULE__{}
   end
 
-  @typedoc "Named parameter matrices, e.g. `%{embedding: E, projection: W}`."
+  @typedoc "Named parameter matrices, e.g. `%{embeddings: E, projection: W}`."
   @type params :: %{atom() => Tensor.matrix()}
 
   @typedoc "One training example. Its shape is the model's business, not ours."
@@ -62,31 +58,82 @@ defmodule TinyLlm.Train do
   Seeds the process `:rand` state so a whole run reproduces.
   """
   @spec seed(integer()) :: :rand.state()
-  def seed(_seed), do: raise("TODO: stage 3")
+  def seed(seed), do: :rand.seed(:exsss, seed)
 
   @doc """
   Trains a model and returns the final params with the loss history.
 
-  Seeds, generates a corpus, converts it to examples, then runs `steps`
-  mini-batches of plain SGD. The history holds `{step, loss}` pairs, one
-  every `log_every` steps, starting at step 0 so the first entry is the
-  loss before any learning has happened.
+  Seeds, generates two corpora, then runs `steps` mini-batches of plain SGD.
+  The history holds `{step, loss}` pairs, one every `log_every` steps,
+  starting at step 0 so the first entry is the loss before any learning.
+
+  Batches are drawn from the training corpus; every logged loss is measured
+  on the whole evaluation corpus, which the model never trains on. Measuring
+  on a training batch instead is tempting and wrong twice over: a batch is
+  small enough that its empirical entropy wanders well below the true value,
+  and the examples are ones the model has already fitted. Both push the
+  number down, and a loss below `H(next | previous)` is not a triumph, it is
+  a leak.
   """
   @spec run(Config.t()) :: %{params: params(), losses: [{non_neg_integer(), float()}]}
-  def run(_config), do: raise("TODO: stage 3")
+  def run(config) do
+    # All three of these draw from one seeded `:rand` stream, so their order
+    # is load-bearing: swapping any two changes every number the run
+    # produces. Training corpus, then evaluation corpus, then parameters.
+    seed(config.seed)
+    examples = config.training_corpus_size |> Grammar.corpus() |> config.model.examples()
+    evaluation = config.evaluation_corpus_size |> Grammar.corpus() |> config.model.examples()
+    params = config.model.init(config)
+
+    {final_params, losses} =
+      Enum.reduce(
+        0..config.steps,
+        {params, []},
+        fn step, {params, losses} ->
+          batch = batch(examples, config.batch_size)
+          updated_params = step(config.model, params, batch, config.learning_rate)
+
+          updated_losses =
+            if rem(step, config.log_every) == 0 do
+              loss = config.model.loss(updated_params, evaluation)
+
+              [{step, loss} | losses]
+            else
+              losses
+            end
+
+          {updated_params, updated_losses}
+        end
+      )
+
+    %{params: final_params, losses: Enum.reverse(losses)}
+  end
 
   @doc """
   One SGD step: subtract `learning_rate` times the gradient from every
   named matrix.
-
-  Generic over any params map, which is the reason stage 5 gets this free.
   """
   @spec step(module(), params(), [example()], float()) :: params()
-  def step(_model, _params, _batch, _learning_rate), do: raise("TODO: stage 3")
+  def step(model, params, batch, learning_rate) do
+    gradients = model.gradients(params, batch)
+
+    params
+    |> Enum.map(fn {key, param} ->
+      gradient = Map.fetch!(gradients, key)
+      scaled_gradient = Tensor.scale(gradient, learning_rate)
+      updated_param = Tensor.sub(param, scaled_gradient)
+      {key, updated_param}
+    end)
+    |> Map.new()
+  end
 
   @doc """
   A random batch of `size` examples, drawn with replacement.
   """
   @spec batch([example()], pos_integer()) :: [example()]
-  def batch(_examples, _size), do: raise("TODO: stage 3")
+  def batch(examples, size) do
+    for _ <- 1..size do
+      Enum.random(examples)
+    end
+  end
 end

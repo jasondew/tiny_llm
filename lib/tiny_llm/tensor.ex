@@ -115,6 +115,26 @@ defmodule TinyLlm.Tensor do
   end
 
   @doc """
+  Every pairing of an entry from one row with an entry from another.
+
+  The expanding counterpart to `dot/2`. Those are the only two ways to
+  multiply a pair of vectors: `dot/2` contracts them into one number, this
+  expands them into a `length(left)` by `length(right)` matrix where
+  `result[i][j]` is `left[i] * right[j]`.
+
+  A backward pass reaches for it whenever a parameter connects exactly one
+  input to exactly one output, because then its gradient is simply how
+  active that input was times how wrong that output was. Equivalent to
+  `matmul(transpose([left]), [right])`, and easier to read as what it is.
+  """
+  @spec outer_product(row(), row()) :: matrix()
+  def outer_product(left_row, right_row) do
+    for left_entry <- left_row do
+      for right_entry <- right_row, do: left_entry * right_entry
+    end
+  end
+
+  @doc """
   The matrix product of an `m` by `n` and an `n` by `p` matrix.
   """
   @spec matmul(matrix(), matrix()) :: matrix()

@@ -19,22 +19,36 @@ defmodule TinyLlm.TrainTest do
 
   use ExUnit.Case, async: true
 
-  # TEMPORARY: skipped until TinyLlm.GradCheck and TinyLlm.Embedder are
-  # implemented, since run/1 trains an Embedder. Delete this line to bring
-  # them back.
-  @moduletag :skip
-
   alias TinyLlm.Embedder
   alias TinyLlm.Tensor
   alias TinyLlm.Test.QuadraticModel
   alias TinyLlm.Train
+
+  # Module level, because ExUnit only allows setup_all outside a describe. A
+  # training run is by far the most expensive thing in this suite and every
+  # test in "run/1" reads the same result, so it happens once for the file
+  # rather than once per test.
+  setup_all do
+    config = %Train.Config{
+      model: Embedder,
+      learning_rate: 1.0,
+      batch_size: 64,
+      steps: 2_000,
+      log_every: 200,
+      training_corpus_size: 2_000,
+      evaluation_corpus_size: 500,
+      seed: 1234
+    }
+
+    {:ok, config: config, result: Train.run(config)}
+  end
 
   describe "Config" do
     test "defaults to the architecture the brief fixes" do
       config = %Train.Config{}
 
       assert config.vocabulary_size == 32
-      assert config.hidden_size == 32
+      assert config.d_model == 32
       assert config.context_length == 16
     end
 
@@ -100,23 +114,9 @@ defmodule TinyLlm.TrainTest do
   end
 
   describe "run/1" do
-    setup do
-      config = %Train.Config{
-        model: Embedder,
-        learning_rate: 0.5,
-        batch_size: 32,
-        steps: 300,
-        log_every: 50,
-        corpus_size: 1_000,
-        seed: 1234
-      }
-
-      {:ok, config: config, result: Train.run(config)}
-    end
-
     test "returns the trained parameters and the loss history", %{result: result} do
       assert Map.keys(result) |> Enum.sort() == [:losses, :params]
-      assert Map.keys(result.params) |> Enum.sort() == [:embedding, :projection]
+      assert Map.keys(result.params) |> Enum.sort() == [:embeddings, :projection]
     end
 
     test "logs a loss every log_every steps, starting before any learning", %{result: result} do
@@ -140,6 +140,16 @@ defmodule TinyLlm.TrainTest do
       assert last_loss < first_loss - 1.0
     end
 
+    test "never claims to beat the bigram floor, which would mean a leak", %{result: result} do
+      # No model conditioned on one word can score below H(next | previous),
+      # which measures 1.9021 nats on this grammar. A loss under it is not a
+      # better model, it is an evaluation set that is too small or not held
+      # out. This test exists because both happened.
+      {_step, last_loss} = List.last(result.losses)
+
+      assert last_loss > 1.85
+    end
+
     test "approaches the bigram floor of about 1.90 nats", %{result: result} do
       # The brief's acceptance criterion. Note the headroom is thin: no
       # model with one word of context can beat H(next | previous), which
@@ -151,12 +161,25 @@ defmodule TinyLlm.TrainTest do
     end
 
     test "keeps the parameter shapes intact through training", %{result: result} do
-      assert Tensor.shape(result.params.embedding) == {32, 32}
+      assert Tensor.shape(result.params.embeddings) == {32, 32}
       assert Tensor.shape(result.params.projection) == {32, 32}
     end
 
-    test "reproduces exactly from the same seed", %{config: config, result: result} do
-      assert Train.run(config).losses == result.losses
+    test "reproduces exactly from the same seed" do
+      # Its own small config. Reproducibility does not need convergence, and
+      # this test is the only one that pays for a second training run.
+      config = %Train.Config{
+        model: Embedder,
+        learning_rate: 1.0,
+        batch_size: 16,
+        steps: 40,
+        log_every: 10,
+        training_corpus_size: 200,
+        evaluation_corpus_size: 50,
+        seed: 99
+      }
+
+      assert Train.run(config).losses == Train.run(config).losses
     end
   end
 end
