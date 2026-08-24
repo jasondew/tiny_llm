@@ -157,11 +157,397 @@ per-example value. Two consequences:
     ∂L/∂x = g Wᵀ                          d
     ∂L/∂E = zeros, row a set to ∂L/∂x     v × d
 
+## The one rule that does most of the work
+
+Stage 3 had two shapes of gradient and they looked unrelated: an outer
+product for `W`, a contraction for `x`. They are the same rule seen at
+`T = 1`. State it once here and stage 4 is mostly bookkeeping.
+
+For any matrix product `Y = F G` with `F` of shape `n × m`, `G` of shape
+`m × p`, and a scalar loss downstream, write `dY ≡ ∂L/∂Y`. Then
+
+    Y_{ab} = Σ_c F_{ac} G_{cb}
+
+    ∂L/∂F_{ac} = Σ_{a'b} dY_{a'b} · ∂Y_{a'b}/∂F_{ac}
+               = Σ_{a'b} dY_{a'b} · δ_{a'a} G_{cb}
+               = Σ_b dY_{ab} G_{cb}
+               = (dY Gᵀ)_{ac}
+
+    ∂L/∂G_{cb} = Σ_{a} dY_{ab} F_{ac}
+               = (Fᵀ dY)_{cb}
+
+so
+
+    dF = dY Gᵀ        dG = Fᵀ dY                                       (R)
+
+Two things are worth noticing before moving on.
+
+**Every gradient has the shape of the thing it is the gradient of**, which
+is the cheapest check available: if `dWq` is not `d × d`, a transpose is in
+the wrong place, and no amount of staring at the algebra finds that faster
+than looking at the shape.
+
+**(B) and (C) are (R) with one row.** `∂L/∂W = xᵀ g` is `Fᵀ dY` where `F` is
+the `1 × d` matrix holding `x`, and `∂L/∂x = g Wᵀ` is `dY Gᵀ`. What looked
+like two different operations in stage 3 is one operation, and the outer
+product was only an outer product because the batch had a single example.
+With `T` positions, `Fᵀ dY` sums over positions and forms the products at
+the same time.
+
 ## Stage 4, attention
 
-To be derived before implementing, per the brief. The pieces that will not
-collapse the way (A) did: the softmax Jacobian applied to upstream
-gradients, splitting the gradient of `QKᵀ` between `Q` and `K`, the
-`1/√d` scale, the causal mask contributing zero through masked positions,
-and accumulating position-embedding gradients across every position that
-used them.
+### What is being differentiated
+
+Stage 4 is a complete model, not a loose layer: it predicts the next token
+at every position at once. The head is the interesting part, but there has
+to be a loss on the end of it or there is nothing to check gradients
+against.
+
+| symbol | meaning | shape |
+| --- | --- | --- |
+| `T` | positions in this sequence, at most `context_length` | ≤ 16 |
+| `E` | token embeddings | `v × d` |
+| `P` | position embeddings | `context_length × d` |
+| `X` | head input, one row per position | `T × d` |
+| `Wq`, `Wk`, `Wv` | query, key, value projections | `d × d` |
+| `Wo` | head output projection | `d × d` |
+| `Wu` | unembedding, back to vocabulary | `d × v` |
+| `Q`, `K`, `V` | queries, keys, values | `T × d` |
+| `U` | raw scores, `Q Kᵀ` | `T × T` |
+| `S` | scaled scores, `U/√d` | `T × T` |
+| `M` | masked scores | `T × T` |
+| `A` | attention weights, `softmax` of each row of `M` | `T × T` |
+| `C` | context, `A V` | `T × d` |
+| `O` | head output, `C Wo` | `T × d` |
+| `Z` | logits | `T × v` |
+
+Indices: `t` and `s` range over positions, `i` over `d`, `j`, `m` over the
+vocabulary or over positions where the context makes it obvious. `a_t` is
+the input token id at position `t` and `y_t` the target.
+
+The forward pass:
+
+    X_t   = E[a_t] + P[t]                        row t of X
+    Q     = X Wq        K = X Wk       V = X Wv
+    U     = Q Kᵀ
+    S     = U / √d
+    M_ts  = S_ts + (s > t ? −1.0e9 : 0)
+    A_t   = softmax(M_t)                         each row on its own
+    C     = A V
+    O     = C Wo
+    Z     = O Wu
+    L     = −(1/N) Σ_t ln p_{t,y_t}              p_t = softmax(Z_t)
+
+`A_ts` reads "how much position `t` draws on position `s`". Row `t` is a
+distribution over the positions `t` is allowed to see, which is why the mask
+goes on before the softmax rather than after: masking after would leave rows
+that no longer sum to 1.
+
+### E. dL/dZ, one row per position
+
+`N` is the total number of predicted positions in the batch, counted across
+every sequence, not the number of sequences. Each row of `Z` is an
+independent instance of stage 3's problem, so (A) applies row by row:
+
+    dZ_{tj} = (p_{tj} − δ_{j,y_t}) / N                                  (E)
+
+**Divide by tokens, not by sentences.** Averaging each sequence and then
+averaging the averages weights a 4 token sentence's tokens four times as
+heavily as a 16 token sentence's. The number that comes out is still a
+loss and still falls, but it is no longer measured in the same unit as the
+bigram's 1.9021 nats, and the one comparison this whole project is built
+around stops meaning anything.
+
+### F. Out through the two projections
+
+`Z = O Wu` and `O = C Wo` are plain matrix products, so (R) does both:
+
+    dWu = Oᵀ dZ           d × v
+    dO  = dZ Wuᵀ          T × d
+    dWo = Cᵀ dO           d × d
+    dC  = dO Woᵀ          T × d                                         (F)
+
+**`Wo` is redundant at stage 4, and that is worth saying out loud.** Since
+`Z = C Wo Wu` and `Wo Wu` is a single `d × v` matrix, this model can express
+exactly what it could express with `Wu` alone. It is the same collapse as
+`E · W` in stage 3. `Wo` is carried anyway because stage 5 wraps the head in
+a residual, `X + C Wo`, and a sum of two terms does not fold into a product
+of one. The redundancy dies the moment the residual arrives.
+
+### G. The context splits into weights and values
+
+`C = A V`, so by (R):
+
+    dA = dC Vᵀ            T × T
+    dV = Aᵀ dC            T × d                                         (G)
+
+Read `dA` as: how much would the loss change if position `t` had leaned a
+little harder on position `s`. That is the gradient the softmax Jacobian is
+about to receive, and unlike stage 3 it is an arbitrary row of numbers.
+
+### H. The softmax Jacobian, which this time does not cancel
+
+Rows of `A` are independent, so there are no cross row terms and the whole
+thing is done one row at a time. The general Jacobian, the one stage 3
+introduced and then dodged:
+
+    ∂A_{tm}/∂M_{tj} = A_{tm} (δ_{mj} − A_{tj})
+
+Chain rule over the row:
+
+    dM_{tj} = Σ_m dA_{tm} · A_{tm} (δ_{mj} − A_{tj})
+            = A_{tj} dA_{tj} − A_{tj} Σ_m dA_{tm} A_{tm}
+
+Name the sum, which is one scalar per row:
+
+    r_t = Σ_m dA_{tm} A_{tm} = dA_t · A_t
+
+    dM_{tj} = A_{tj} (dA_{tj} − r_t)                                    (H)
+
+In stage 3, `∂L/∂p` was `−1/p_t` on a single entry and zero everywhere else.
+The `1/p_t` cancelled against the `p_t` the Jacobian carries, `r_t` collapsed
+to `−1`, and the result was the subtraction in (A). Here `dA_t` is a full
+row that arrived from `dC Vᵀ`, nothing cancels, and `r_t` survives. **(A) is
+the special case. (H) is the rule.**
+
+There is a free self test hiding in this. Adding a constant to a row of `M`
+does not change `softmax(M_t)`, so the loss cannot depend on that direction,
+so every row of `dM` must sum to exactly zero:
+
+    Σ_j dM_{tj} = Σ_j A_{tj} dA_{tj} − r_t Σ_j A_{tj} = r_t − r_t = 0
+
+`Σ_j A_{tj} = 1` is what makes the second term collapse. If a row of `dM`
+does not sum to zero, (H) is wrong and no finite difference run is needed to
+know it.
+
+### I. The mask costs nothing on the way back
+
+`M = S + mask` with `mask` constant, so `dS = dM` entry for entry. There is
+no masking step in the backward pass at all, and there does not need to be:
+for `s > t` the forward pass computed `exp(−1.0e9 − max)`, which **underflows
+to exactly 0.0**, so `A_{ts} = 0.0` and (H) gives
+
+    dM_{ts} = A_{ts} (dA_{ts} − r_t) = 0.0 · (anything) = 0.0
+
+Exactly zero, not nearly zero. It is a multiplication by a float that is
+literally `0.0`. The forward mask already did the work.
+
+This is the one place the magic number matters. A "large enough looking"
+`−100.0` would leave `A_{ts} ≈ 3.7e−44`, a subnormal that is not zero, and
+the future would leak a whisper of gradient into the past forever. `−1.0e9`
+underflows; that is the entire reason for the size of it.
+
+### J. The scale
+
+`S = U/√d` is a constant multiple, so
+
+    dU = dS / √d                                                        (J)
+
+Why `√d` at all: `U_ts` is a sum of `d` products, so if the entries of `Q`
+and `K` are roughly independent with variance `σ²`, then `U_ts` has variance
+`d σ²` and the scores grow like `√d`. Large scores saturate the softmax,
+every row of `A` goes to a one hot, and by (H) the gradient `A_{tj}(…)` goes
+to zero along with it. Dividing by `√d` holds the score variance fixed as
+`d` changes, so the head still learns at `d = 32` for the same reason it
+learns at `d = 8`.
+
+### K. Splitting QKᵀ
+
+`U = Q Kᵀ`. Apply (R) with `F = Q` and `G = Kᵀ`:
+
+    dQ = dU (Kᵀ)ᵀ = dU K
+    dKᵀ = Qᵀ dU     ⟹     dK = (Qᵀ dU)ᵀ = dUᵀ Q                        (K)
+
+Neither result has a transpose on the matrix coming back, because `Kᵀ` was
+already the transposed factor. What distinguishes them is `dUᵀ`. Every
+position's query meets every position's key, so the same `T × T` block of
+gradient has to be read twice: once indexed by the querying position and
+once by the keyed position. The transpose is what swaps which index is
+which, and getting it backwards is the single easiest mistake in this
+derivation to make and the hardest to see, because `dQ` and `dK` have
+identical shapes and the loss still falls.
+
+Shapes, since they are all that will save you here: `dU` is `T × T`, `K` is
+`T × d`, so `dU K` is `T × d`. `dUᵀ` is `T × T`, `Q` is `T × d`, so `dUᵀ Q`
+is `T × d`. Both correct, which is exactly why the shape check does **not**
+catch a swapped transpose. The gradient check does.
+
+### L. Three branches meet at X
+
+`Q = X Wq`, `K = X Wk`, `V = X Wv`, three independent applications of (R):
+
+    dWq = Xᵀ dQ        dWk = Xᵀ dK        dWv = Xᵀ dV                   d × d
+
+and then the three contributions to `X` itself, which **add**:
+
+    dX = dQ Wqᵀ + dK Wkᵀ + dV Wvᵀ                     T × d             (L)
+
+This is the first value in the project that gets used more than once, and
+the multivariable chain rule says to sum over every path from a variable to
+the loss. There are three paths out of `X` and all three come back.
+
+Dropping one of the three terms is the classic error, and it is quiet: two
+thirds of the gradient is still right, the loss still falls, the model still
+trains. Its signature under the gradient check is specific and easy to read.
+`Wq`, `Wk` and `Wv` all pass, because they are computed from `dQ`, `dK` and
+`dV` directly and never touch `dX`. Only `E` and `P` fail.
+
+### M. Down to the tables
+
+Row `t` of `X` was assembled by adding two rows that were looked up:
+
+    X_{ti} = E_{a_t,i} + P_{t,i}
+    ∂X_{ti}/∂E_{r,i} = δ_{r,a_t}          ∂X_{ti}/∂P_{u,i} = δ_{ut}
+
+so both gradients are scatter adds of the same rows of `dX` into different
+tables:
+
+    dE[a_t] += dX_t     for every position t of every sequence
+    dP[t]   += dX_t     for every position t of every sequence          (M)
+
+The difference is what indexes them, and it shows up as soon as there is
+more than one sequence in the batch.
+
+`P` is indexed by position. Within one sequence each row receives exactly
+one contribution, but every sequence in a batch of `B` has a position 0, so
+across the batch row 0 of `dP` receives `B` of them. Early positions
+accumulate from every sequence; late positions only from sequences long
+enough to reach them, so `dP`'s last rows are quieter and its unreached rows
+are exactly zero.
+
+`E` is indexed by token. It accumulates whenever a token repeats, which
+`"the"` does in nearly every sentence in this grammar, and rows for tokens
+absent from the batch stay exactly zero, the same as stage 3's (D).
+
+A second free self test falls out of this. Both tables receive every row of
+`dX` exactly once, just filed differently, so their column sums are equal:
+
+    Σ_r dE_r = Σ_t dX_t = Σ_u dP_u
+
+Two tables of different heights, `v × d` and `context_length × d`, summing
+down to the identical `d` wide row. That is cheap to assert and it fails
+loudly if either scatter add drops a position or double counts one.
+
+### Summary
+
+    dZ  = (p − onehot(y)) / N                 T × v      per position
+    dWu = Oᵀ dZ                               d × v
+    dO  = dZ Wuᵀ                              T × d
+    dWo = Cᵀ dO                               d × d
+    dC  = dO Woᵀ                              T × d
+    dA  = dC Vᵀ                               T × T
+    dV  = Aᵀ dC                               T × d
+    dM_{tj} = A_{tj}(dA_{tj} − dA_t · A_t)    T × T      rows sum to 0
+    dS  = dM                                  T × T      mask is additive
+    dU  = dS / √d                             T × T
+    dQ  = dU K                                T × d
+    dK  = dUᵀ Q                               T × d
+    dWq = Xᵀ dQ   dWk = Xᵀ dK   dWv = Xᵀ dV   d × d
+    dX  = dQ Wqᵀ + dK Wkᵀ + dV Wvᵀ            T × d      three paths, added
+    dE[a_t] += dX_t   dP[t] += dX_t           scatter adds
+
+### The gradient check has a hole, and it is exactly here
+
+`GradCheck.relative_error/2` divides by `max(|analytic| + |numeric|, guard)`
+with `guard = 1.0e-8`. That guard exists so a legitimately zero gradient does
+not divide by zero. It also means that **when both gradients are far below
+the guard, the check reports agreement no matter what the derivation says**,
+because it is comparing two numbers that are both effectively zero against a
+denominator that is not.
+
+The score path walks straight into it. `Tensor.random/3` defaults to a scale
+of `0.02`, and `U = (X Wq)(X Wk)ᵀ` carries four of those factors before the
+gradient starts back. Measured on the `v = 6`, `d = 8`, `T ≤ 4` config, the
+largest analytic gradient in each matrix at init:
+
+    scale   E        P        Wq       Wk       Wv       Wo       Wu
+    0.02    2.8e−06  2.1e−06  8.3e−13  5.5e−13  2.7e−06  5.6e−06  3.9e−06
+    0.5     4.1e−02  3.0e−02  4.8e−03  3.2e−03  4.5e−02  8.5e−02  5.7e−02
+
+At `0.02`, `dWq` and `dWk` sit five orders of magnitude *below* the guard,
+and every bug in (H), (J) and (K) passes the check. Verified by injecting
+them: at the default scale, a swapped transpose, a dropped `r_t` and a
+missing `√d` all report `ok` on all seven matrices. The safety net has a hole
+precisely over the hardest math in the project.
+
+A check that cannot fail is worse than no check, because it is trusted. The
+test has to assert the analytic gradients clear the guard rather than assume
+it.
+
+### The same number kills training outright
+
+This is not confined to the check. At the full `32 × 32` config, learning
+rate `0.5`, batch 64, held out on 200 sentences:
+
+    init scale   dWq at init   step 0    50      100     150     200
+    0.02         1.1e−12       3.4657  3.4657  3.4657  3.4657  3.4657
+    0.177        4.6e−06       3.4633  2.9313  2.7572  2.1523  2.0491
+    0.5          5.7e−03       3.3470  2.2862  1.8312  1.7327  1.6833
+
+The first row is not slow learning. It is `ln(32) = 3.4657` to four decimal
+places, unchanged for 500 steps: a flat loss curve, no error raised, and a
+completely correct backward pass underneath it. The gradients reaching `Wq`
+are `1.1e−12`, so the parameters never move.
+
+**Stage 3's `0.02` was not wrong, it was short.** That path was
+`E → W → logits`, two factors deep, and `0.02` kept the initial logits near
+zero so the first loss landed on `ln(v)`, which is exactly what stage 3
+wanted. The score path is four factors deep before the gradient turns
+around, and a scale that is merely small in a two factor product is
+annihilating in a four factor one.
+
+### The fix, and why it is a calculation rather than a preference
+
+Scale each matrix by its own fan in and fan out rather than by one constant:
+
+    scale(fan_in, fan_out) = √( 6 / (fan_in + fan_out) )
+
+which is `0.6124` at `d = 8` and `0.3062` at `d = 32`. The `6` is what makes
+a uniform draw on `−scale..scale` carry the variance `2/(fan_in + fan_out)`
+that keeps activations from growing or shrinking as they pass through a
+layer, which is the same argument the `1/√d` in (J) makes about scores.
+
+Measured, with everything else unchanged:
+
+- the gradient check at `v = 6`, `d = 8` now clears the guard by a factor
+  between `1.8e6` and `1.8e7` on every matrix, and reports errors of `1e−9`
+  to `4e−8`. Vacuity is no longer possible.
+- at full size it crosses the bigram floor of `1.9021` between step 100 and
+  step 150, and reaches `1.6742` by step 300. **301 steps and 7 held out
+  evaluations take 50.3 seconds**, inside the brief's budget with room for
+  stage 5 to spend some.
+
+That crossing is the point of the whole project. It is the first time
+anything here has done something a bigram cannot.
+
+### Reading a failed gradient check
+
+Which matrices fail localizes the bug better than any amount of rereading.
+Every row below was produced by injecting that bug into a working
+implementation at `v = 6`, `d = 8`, `T ≤ 4`, `N = 8`, init scale `0.5`, so
+these are measurements and not predictions.
+
+| failing | error | the bug |
+| --- | --- | --- |
+| all seven | `0.7778` | the `1/N` in (E), dropped. `(N−1)/(N+1) = 7/9` |
+| `E`, `P` only | `1.0000` | a missing term in `dX`, (L) |
+| `E`, `P`, `Wk`, but `Wq` fine | `1.0000` | the transpose in (K). Only `dK` is wrong, so `Wq` stays clean and `Wk` and everything downstream of `dX` does not |
+| `E`, `P`, `Wq`, `Wk` | `1.0000` | `r_t` dropped from (H) |
+| `Wq`, `Wk` only | `0.4776` | the `√d` of (J), applied forward but not back. `(√d−1)/(√d+1)` at `d = 8` |
+
+Two patterns are worth internalizing. **`E` and `P` fail whenever anything
+upstream of `dX` is wrong**, because every path to the tables runs through
+it, so they are the noisiest signal and the last one to diagnose from.
+**`Wq` and `Wk` are the only matrices downstream of the softmax Jacobian and
+the scale**, so a failure confined to those two points at (H), (J) or (K)
+and nowhere else.
+
+Two cheaper checks come before finite differences. Rows of `dM` must sum to
+zero, from (H). `dE` and `dP` must have identical column sums, from (M).
+Both are one line and neither needs a perturbation loop.
+
+Then: check shapes, because half the errors above are a transpose and shapes
+find those instantly. And run on the smallest config that still exercises
+every path. `T = 4` and `d = 8` is enough to distinguish `dU K` from
+`dU Kᵀ`; `T = 1` is not, because at `T = 1` the mask is empty, `A` is the
+scalar `1.0`, and (H) reports zero whatever you wrote.
