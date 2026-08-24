@@ -125,6 +125,30 @@ accumulating position-embedding grads.
 **Accept:** gradient check passes for every parameter matrix on a 4-token,
 d=8 config.
 
+**Measured once built**, on the default config (1000 steps, lr 0.5, batch
+64, seed 1234): held-out loss 1.5764, well under the bigram floor of
+1.9021. Four findings that later stages depend on.
+
+  * **Beating the floor and resolving agreement are not the same
+    milestone.** At 300 steps the loss is already 1.6742, past the floor,
+    and the model still emits a plural verb after `the llama who chases the
+    dogs` whatever the subject is. Agreement is close to the last thing it
+    learns. Never read a loss number as evidence of agreement; measure
+    agreement directly (stage 6a).
+  * **It resolves agreement through the embedded verb, not the subject.**
+    Predicting the main verb of `the llama who chases the dogs`, the final
+    position attends 0.30 to `chases`, 0.21 to `who`, 0.19 to itself and
+    only 0.11 to `llama`. `chases` already carries the subject's number, so
+    reading it off there is sufficient, and that is what the model does.
+  * **The head is largely positional.** The attention matrices for `the
+    llama who chases the dogs` and `the dogs who chase the llama` agree to
+    roughly 0.02 entry for entry, despite sharing no content word in the
+    same slot. Number rides in the value vectors, not in the attention
+    pattern. One head with no MLP has little else available to it.
+  * **An attention sink appears unprompted.** The first verb position puts
+    0.79 on `<start>`, having nothing useful to look back at. A documented
+    production-transformer behavior, reproduced in 13K parameters.
+
 ## Stage 5. `TinyLlm.Block` + `TinyLlm.Model` (~150 lines)
 
 MLP 32→128→32 with ReLU; residual connections around attention and MLP;
@@ -148,7 +172,10 @@ Eval — three checks that produce the talk's numbers:
   c. **Grammaticality**: structural checker (extend the stage-1 one) over
      generated sentences.
 **Accept:** Model beats Embedder and Bigram on (a) by a wide margin;
-majority of generated sentences are both unseen and grammatical.
+majority of generated sentences are both unseen and grammatical. Measure
+(a) at the full step count, not at the point the loss curve flattens:
+stage 4 showed agreement arriving several hundred steps after the loss has
+already passed the bigram floor.
 
 ## Stage 7. `TinyLlm.PCA` + Livebook
 
@@ -166,8 +193,15 @@ offsets) →
 probe-sentence attention heatmap → temperature slider (Kino.Control) with
 per-step probability bars.
 **Accept:** Livebook runs top-to-bottom on a fresh machine with only
-Livebook installed; the probe heatmap shows the verb position attending to
-the subject noun (`llama`), not the distractor (`dogs`).
+Livebook installed; the probe heatmap is legible and the verb position's
+attention is visibly structured rather than flat.
+
+Do **not** gate on the verb position attending to `llama` over `dogs`,
+which is what this criterion asked for until stage 4 measured it. The
+stage 4 model attends 0.11 to `llama` and 0.19 to `dogs` and still predicts
+the singular verb correctly, because it reads the subject's number off the
+embedded verb `chases` (0.30). Re-measure once stage 5 lands, and let the
+slide say what the heatmap shows rather than what it ought to.
 
 ## Definition of done
 
