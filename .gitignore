@@ -24,3 +24,7 @@ tiny_llm-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+# Trained checkpoints. Every one of them reproduces from a seed, so the
+# repo carries the recipe rather than the artifact.
+/priv/checkpoints/
