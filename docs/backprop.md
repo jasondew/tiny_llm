@@ -551,3 +551,208 @@ find those instantly. And run on the smallest config that still exercises
 every path. `T = 4` and `d = 8` is enough to distinguish `dU K` from
 `dU Kᵀ`; `T = 1` is not, because at `T = 1` the mask is empty, `A` is the
 scalar `1.0`, and (H) reports zero whatever you wrote.
+
+## Stage 5, the block
+
+Stage 4 was one sublayer with a loss bolted on. Stage 5 wraps it in the
+three things that make a transformer block: a normalization before each
+sublayer, a residual around each sublayer, and a position-wise MLP.
+
+### What is being differentiated
+
+| symbol | meaning | shape |
+| --- | --- | --- |
+| `h` | MLP hidden width | 128 |
+| `g1`, `g2`, `g3` | RMSNorm gains | `d` each |
+| `W1`, `b1` | MLP up-projection and bias | `d × h`, `h` |
+| `W2`, `b2` | MLP down-projection and bias | `h × d`, `d` |
+| `N1`, `N2`, `N3` | normalized activations | `T × d` |
+| `O` | attention sublayer output, stage 4's `C Wo` | `T × d` |
+| `R` | first residual stream, `X + O` | `T × d` |
+| `Pre` | MLP hidden before ReLU | `T × h` |
+| `Hid` | MLP hidden after ReLU | `T × h` |
+| `Mlp` | MLP sublayer output | `T × d` |
+| `Y` | second residual stream, `R + Mlp` | `T × d` |
+
+The forward pass:
+
+    X    = E[a_t] + P[t]                    as in stage 4
+    N1   = rmsnorm(X, g1)
+    O    = attention(N1)                    every line of stage 4, on N1
+    R    = X + O
+    N2   = rmsnorm(R, g2)
+    Pre  = N2 W1 + b1
+    Hid  = max(Pre, 0)
+    Mlp  = Hid W2 + b2
+    Y    = R + Mlp
+    N3   = rmsnorm(Y, g3)
+    Z    = N3 Wu
+    L    = −(1/N) Σ_t ln p_{t,y_t}
+
+Two choices are worth stating because the alternatives are defensible and
+this file is the record of which was taken.
+
+**Pre-norm, not post-norm.** The normalization sits *before* each sublayer
+and the residual skips *around* both. The alternative, `R = rmsnorm(X + O)`,
+was the original 2017 arrangement and trains noticeably worse without a
+warmup schedule, because the residual path is no longer a clean identity
+from the loss all the way back to the embeddings.
+
+**A third norm before the unembedding.** Without it, `Y` reaches `Wu` with
+whatever scale the residual stream happened to accumulate, which is neither
+controlled nor stable across training.
+
+### N. RMSNorm, forward
+
+Per row `x` of the input, independently. `ε` guards a row of exact zeros.
+
+    ms  = (1/d) Σ_i x_i²
+    r   = √(ms + ε)
+    n_i = x_i / r
+    y_i = g_i n_i
+
+Note what is missing compared to LayerNorm: no mean subtraction, and no
+bias. RMSNorm rescales without recentring. That is not a simplification
+made for this project, it is what the RMSNorm paper found: the recentring
+does almost nothing and costs a pass over the row.
+
+### O. RMSNorm, backward
+
+The gain is easy, because `g_i` multiplies exactly one output:
+
+    dg_i = Σ_over rows dy_{t,i} n_{t,i}                              (O1)
+
+`g` is a single vector shared by every row, so its gradient accumulates over
+every position in every sequence, exactly like `P` does.
+
+For the input, write `dn_i = dy_i g_i` and let
+
+    c = (1/d) Σ_i dn_i n_i
+
+Then
+
+    dx_j = (1/r) (dn_j − n_j c)                                      (O2)
+
+Worth seeing where `c` comes from, because the shape of this result is the
+same one that appeared in the softmax Jacobian and it is not a coincidence.
+`n_j` depends on *every* `x_i`, through `r`. So
+
+    ∂n_i/∂x_j = δ_ij / r + x_i ∂(1/r)/∂x_j
+
+and since `∂r/∂x_j = x_j / (d r)`,
+
+    ∂(1/r)/∂x_j = −x_j / (d r³)
+
+Contracting with `dn` and substituting `x_j = n_j r` collapses the second
+term to `n_j c / r`, giving (O2).
+
+Both (H) and (O2) have the form *"the direct term, minus the output times a
+scalar summarizing the whole row"*. Any operation that normalizes a row
+couples every entry to every other, and the price is always one row-scalar
+subtracted off. Softmax normalizes by a sum, RMSNorm by a root-mean-square,
+and the algebra rhymes.
+
+**Free check.** Take `ε = 0`, and note `Σ_j n_j² = d`. Then
+
+    Σ_j dx_j n_j = (1/r)(Σ_j dn_j n_j − c Σ_j n_j²) = (1/r)(d c − d c) = 0
+
+so **every row of `dx` is orthogonal to the corresponding row of `n`**. This
+is the RMSNorm counterpart of "rows of `dM` sum to zero", it costs one dot
+product, and it catches a dropped or mis-scaled `c` immediately.
+
+### P. ReLU
+
+    dPre_{ti} = dHid_{ti} · [Pre_{ti} > 0]
+
+Strictly `>`, not `≥`. ReLU has no derivative at exactly zero and the choice
+is arbitrary, but it must be *made*, and 0 is the conventional pick. It also
+matters that the condition tests `Pre`, the value before the ReLU, not
+`Hid` after it. They agree wherever `Pre > 0` and differ nowhere that
+matters here, but reaching for the cached pre-activation is the habit that
+stays correct when the nonlinearity is not ReLU.
+
+### Q. The MLP
+
+Two applications of (R), with the biases falling out as column sums:
+
+    dW2 = Hidᵀ dMlp      db2 = Σ_t dMlp_t       dHid = dMlp W2ᵀ      (Q1)
+    dW1 = N2ᵀ dPre       db1 = Σ_t dPre_t       dN2  = dPre W1ᵀ      (Q2)
+
+A bias is added identically to every row, so its gradient is the sum of the
+gradient over every row. That is the same scatter-add logic as `P` in stage
+4, with one destination instead of `T` of them.
+
+### R. Residuals, and why they are the easy part
+
+`R = X + O` and `Y = R + Mlp` are additions, so each sends its incoming
+gradient to both of its inputs unchanged:
+
+    dR gets dY                dMlp gets dY
+    dX gets dR                dO   gets dR
+
+That is the whole rule, and it is why residual connections fix vanishing
+gradients: there is now a path from the loss to `X` that passes through no
+matrix at all. Whatever the sublayers do to their share, the identity path
+delivers `dY` to the embeddings undiminished.
+
+The consequence for implementation is that `dR` and `dX` are each a **sum of
+two contributions** arriving from different places, and neither is complete
+until both have arrived:
+
+    dR = dY + dR_from_norm2                                          (R1)
+    dX = dR + dX_from_norm1                                          (R2)
+
+This is the same trap as `dX` in stage 4, one level up. Drop the second term
+of (R2) and the loss still falls, most matrices still pass the check, and
+only `E` and `P` fail.
+
+### S. The whole chain, in the order it runs
+
+    dZ                 = (p − onehot(y)) / N                          (E)
+    dWu = N3ᵀ dZ       dN3 = dZ Wuᵀ                                   (F)
+    dg3, dY            = rmsnorm_backward(Y, g3, dN3)                 (O)
+    dMlp               = dY
+    dW2, db2, dHid     = (Q1) on dMlp
+    dPre               = dHid ⊙ [Pre > 0]                             (P)
+    dW1, db1, dN2      = (Q2) on dPre
+    dg2, dR_from_norm2 = rmsnorm_backward(R, g2, dN2)                 (O)
+    dR                 = dY + dR_from_norm2                          (R1)
+    dO                 = dR
+    dWq…dWo, dN1       = stage 4 (F) through (L), on dO
+    dg1, dX_from_norm1 = rmsnorm_backward(X, g1, dN1)                 (O)
+    dX                 = dR + dX_from_norm1                          (R2)
+    dE[a_t] += dX_t    dP[t] += dX_t                                  (M)
+
+Everything from `dO` to `dN1` is stage 4 unchanged. The head does not know
+it has been wrapped; it receives a gradient on its output and returns one on
+its input, exactly as before. That is worth saying out loud when presenting
+this: a transformer is not a new idea per block, it is the same block again.
+
+### Wo stops being redundant here
+
+Stage 4 noted that `Z = C Wo Wu` collapses: two matrices in series with
+nothing between them are one matrix, so `Wo` was free parameters buying no
+expressiveness, just as `E W` in stage 3 was.
+
+The residual breaks that. `O = C Wo` is now *added to* `X` rather than fed
+straight onward, and `X + C Wo` cannot be rewritten as `C` times anything.
+The same is true of the MLP: `W1` and `W2` in series would collapse if the
+ReLU were not between them. Every one of these matrices earns its place only
+because something non-linear or non-composable sits next to it, which is a
+reasonable one-line summary of why deep networks are built the way they are.
+
+### What to expect from the gradient check
+
+Nine matrices plus three gain vectors now. The new failure signatures:
+
+| failing | the likely bug |
+| --- | --- |
+| `E`, `P` only | a dropped term in (R1) or (R2) |
+| `g3`, and nothing else | (O1) summing the wrong factor; it is `dy · n`, not `dy · y` |
+| everything from `g2` back, `W1`/`W2` clean | `c` dropped from (O2) at norm 2 |
+| `W1`, `b1` fail, `W2`, `b2` clean | the ReLU mask, (P), applied to the wrong side |
+| `b1`, `b2` only | summing the bias gradient down the wrong axis |
+
+And the two free checks, both cheaper than a perturbation loop: every row of
+`dx` out of `rmsnorm_backward` is orthogonal to the corresponding row of `n`,
+and `dE` and `dP` still have identical column sums.
