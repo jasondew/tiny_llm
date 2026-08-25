@@ -99,14 +99,20 @@ defmodule TinyLlm.Block do
   """
   @spec init(Train.Config.t()) :: Train.params()
   def init(%{d_model: d_model}) do
-    d_hidden = hidden_width(d_model)
+    hidden = hidden_width(d_model)
+    square = Tensor.fan_scale(d_model, d_model)
+    projection = Tensor.fan_scale(d_model, hidden)
 
     %{
       gain1: Tensor.ones(1, d_model),
+      query_weight: Tensor.random(d_model, d_model, square),
+      key_weight: Tensor.random(d_model, d_model, square),
+      value_weight: Tensor.random(d_model, d_model, square),
+      output_weight: Tensor.random(d_model, d_model, square),
       gain2: Tensor.ones(1, d_model),
-      weight1: Tensor.random(d_model, d_hidden),
-      bias1: Tensor.zeros(1, d_hidden),
-      weight2: Tensor.random(d_hidden, d_model),
+      weight1: Tensor.random(d_model, hidden, projection),
+      bias1: Tensor.zeros(1, hidden),
+      weight2: Tensor.random(hidden, d_model, projection),
       bias2: Tensor.zeros(1, d_model)
     }
   end
@@ -158,7 +164,34 @@ defmodule TinyLlm.Block do
   """
   @spec rmsnorm_backward(norm_cache(), Tensor.matrix(), Tensor.matrix()) ::
           {Tensor.matrix(), Tensor.matrix()}
-  def rmsnorm_backward(_cache, _gain, _doutput), do: raise("TODO: stage 5")
+  def rmsnorm_backward(cache, gain, doutput) do
+    [gain_row] = gain
+    width = length(gain_row)
+
+    # One gain vector is shared by every position, so its gradient is the sum
+    # of dy * n down every row, the same accumulation `positions` gets.
+    dgain =
+      Enum.zip_reduce(doutput, cache.normalized, List.duplicate(0.0, width), fn drow,
+                                                                                normalized_row,
+                                                                                totals ->
+        contribution = Enum.zip_with(drow, normalized_row, &(&1 * &2))
+
+        Enum.zip_with(totals, contribution, &+/2)
+      end)
+
+    # `coupling` is one number per row, not per entry. Normalizing a row ties
+    # every entry to every other, so each entry loses the row's average
+    # effect, exactly as the softmax Jacobian subtracts its own row scalar.
+    dinput =
+      Enum.zip_with([doutput, cache.normalized, cache.rms], fn [drow, normalized_row, rms] ->
+        dnormalized = Enum.zip_with(drow, gain_row, &(&1 * &2))
+        coupling = Tensor.dot(dnormalized, normalized_row) / width
+
+        Enum.zip_with(dnormalized, normalized_row, fn dn, n -> (dn - n * coupling) / rms end)
+      end)
+
+    {[dgain], dinput}
+  end
 
   @doc """
   One block forward pass, keeping every intermediate the backward pass needs.

@@ -8,8 +8,8 @@ defmodule TinyLlm.AttentionTest do
   The brief fixes the architecture but not every shape, so these tests
   assume:
 
-    * params are the seven matrices `%{embeddings:, positions:, wq:, wk:,
-      wv:, wo:, projection:}`. `embeddings` and `projection` keep the names
+    * params are the seven matrices `%{embeddings:, positions:, query_weight:, key_weight:,
+      value_weight:, output_weight:, projection:}`. `embeddings` and `projection` keep the names
       and roles they had in stage 3; `positions` is new and is what makes
       this the first model in the project that can tell word order apart.
     * an example is `{input_ids, target_ids}`, two equal length lists, one
@@ -23,7 +23,7 @@ defmodule TinyLlm.AttentionTest do
 
   The gradient check runs on a deliberately larger init scale than training
   would use. See "the gradient check has a hole" in docs/backprop.md: at the
-  old default of 0.02 the gradients into `wq` and `wk` land five orders of
+  old default of 0.02 the gradients into `query_weight` and `key_weight` land five orders of
   magnitude below `GradCheck.guard()`, and every bug in the softmax
   Jacobian, the scale and the QK transpose passes. Two tests below exist
   only to make sure that can never quietly happen again.
@@ -41,7 +41,15 @@ defmodule TinyLlm.AttentionTest do
   @config %Train.Config{model: Attention, vocabulary_size: 32, d_model: 32, context_length: 16}
   @tiny %Train.Config{model: Attention, vocabulary_size: 6, d_model: 8, context_length: 4}
 
-  @matrices [:embeddings, :positions, :projection, :wk, :wo, :wq, :wv]
+  @matrices [
+    :embeddings,
+    :key_weight,
+    :output_weight,
+    :positions,
+    :projection,
+    :query_weight,
+    :value_weight
+  ]
 
   # Three sequences of different lengths, so a batch exercises the two things
   # a single fixed-width batch cannot: that T varies, and that dP's later
@@ -71,10 +79,10 @@ defmodule TinyLlm.AttentionTest do
 
       assert Tensor.shape(params.embeddings) == {6, 8}
       assert Tensor.shape(params.positions) == {4, 8}
-      assert Tensor.shape(params.wq) == {8, 8}
-      assert Tensor.shape(params.wk) == {8, 8}
-      assert Tensor.shape(params.wv) == {8, 8}
-      assert Tensor.shape(params.wo) == {8, 8}
+      assert Tensor.shape(params.query_weight) == {8, 8}
+      assert Tensor.shape(params.key_weight) == {8, 8}
+      assert Tensor.shape(params.value_weight) == {8, 8}
+      assert Tensor.shape(params.output_weight) == {8, 8}
       assert Tensor.shape(params.projection) == {8, 6}
     end
 
@@ -104,7 +112,7 @@ defmodule TinyLlm.AttentionTest do
       for {key, {fan_in, fan_out}} <- [
             embeddings: {32, 32},
             positions: {16, 32},
-            wq: {32, 32},
+            query_weight: {32, 32},
             projection: {32, 32}
           ] do
         expected = :math.sqrt(6 / (fan_in + fan_out))
@@ -308,7 +316,7 @@ defmodule TinyLlm.AttentionTest do
       # GradCheck divides by max(|analytic| + |numeric|, guard). When both
       # gradients sit far below the guard it reports agreement whatever the
       # derivation says. At the stage 3 init scale of 0.02 that is exactly
-      # what happens to wq and wk, and a swapped transpose, a dropped r_t
+      # what happens to query_weight and key_weight, and a swapped transpose, a dropped r_t
       # and a missing sqrt(d) all pass. Assert the gradients are real before
       # trusting the test above.
       gradients = Attention.gradients(tiny_params(), @batch)

@@ -11,7 +11,7 @@ defmodule TinyLlm.BlockTest do
 
     * pre-norm: `rmsnorm` before each sublayer, residual around each, and a
       block that is the identity when both sublayer outputs are zero.
-    * the block's params are `%{g1:, wq:, wk:, wv:, wo:, g2:, w1:, b1:,
+    * the block's params are `%{g1:, query_weight:, key_weight:, value_weight:, output_weight:, g2:, w1:, b1:,
       w2:, b2:}`. Gains and biases are single-row matrices rather than bare
       lists, so `Train.step/4` keeps working on them unchanged.
     * `rmsnorm/2` returns `normalized` and `rms` alongside `output`, because
@@ -86,7 +86,18 @@ defmodule TinyLlm.BlockTest do
   describe "init/1" do
     test "builds the ten matrices the block needs" do
       assert Map.keys(tiny_params()) |> Enum.sort() ==
-               [:bias1, :bias2, :gain1, :gain2, :weight1, :weight2, :wk, :wo, :wq, :wv]
+               [
+                 :bias1,
+                 :bias2,
+                 :gain1,
+                 :gain2,
+                 :key_weight,
+                 :output_weight,
+                 :query_weight,
+                 :value_weight,
+                 :weight1,
+                 :weight2
+               ]
     end
 
     test "shapes each matrix from the config" do
@@ -94,10 +105,10 @@ defmodule TinyLlm.BlockTest do
 
       assert Tensor.shape(params.gain1) == {1, 8}
       assert Tensor.shape(params.gain2) == {1, 8}
-      assert Tensor.shape(params.wq) == {8, 8}
-      assert Tensor.shape(params.wk) == {8, 8}
-      assert Tensor.shape(params.wv) == {8, 8}
-      assert Tensor.shape(params.wo) == {8, 8}
+      assert Tensor.shape(params.query_weight) == {8, 8}
+      assert Tensor.shape(params.key_weight) == {8, 8}
+      assert Tensor.shape(params.value_weight) == {8, 8}
+      assert Tensor.shape(params.output_weight) == {8, 8}
       assert Tensor.shape(params.weight1) == {8, 32}
       assert Tensor.shape(params.bias1) == {1, 32}
       assert Tensor.shape(params.weight2) == {32, 8}
@@ -308,7 +319,7 @@ defmodule TinyLlm.BlockTest do
     end
 
     test "is the identity when both sublayers output zero", %{input: input} do
-      # Zero wo and w2/b2 and the two sublayers contribute nothing, so the
+      # Zero output_weight and w2/b2 and the two sublayers contribute nothing, so the
       # residuals must hand the input straight through. This is the sharpest
       # test of the residual wiring there is: nothing else in the block can
       # make it pass.
@@ -316,7 +327,7 @@ defmodule TinyLlm.BlockTest do
 
       silenced = %{
         params
-        | wo: Tensor.zeros(8, 8),
+        | output_weight: Tensor.zeros(8, 8),
           weight2: Tensor.zeros(32, 8),
           bias2: Tensor.zeros(1, 8)
       }
@@ -372,7 +383,7 @@ defmodule TinyLlm.BlockTest do
 
       silenced = %{
         params
-        | wo: Tensor.zeros(8, 8),
+        | output_weight: Tensor.zeros(8, 8),
           weight2: Tensor.zeros(32, 8),
           bias2: Tensor.zeros(1, 8)
       }

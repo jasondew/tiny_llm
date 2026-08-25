@@ -32,6 +32,23 @@ defmodule TinyLlm.Tensor do
   end
 
   @doc """
+  The scale to draw a `fan_in` by `fan_out` matrix at.
+
+  `sqrt(6 / (fan_in + fan_out))` gives a uniform draw the variance that
+  keeps activations from growing or shrinking as they pass through a layer.
+  It is the same argument the `sqrt(d)` in attention's scores makes, applied
+  to the parameters instead of the scores.
+
+  A constant scale works while a network is shallow and stops working when
+  it is not. See "the same number kills training outright" in
+  docs/backprop.md for the measurement.
+  """
+  @spec fan_scale(pos_integer(), pos_integer()) :: float()
+  def fan_scale(fan_in, fan_out) do
+    :math.sqrt(6 / (fan_in + fan_out))
+  end
+
+  @doc """
   A `rows` by `columns` matrix drawn uniformly from `-scale..scale`.
 
   Draws from the process `:rand` state, so seeding the process makes the

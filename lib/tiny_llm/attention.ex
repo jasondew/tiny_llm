@@ -15,13 +15,13 @@ defmodule TinyLlm.Attention do
   ## Forward
 
       X    = embeddings[input_ids] + positions[0..T-1]   T x d
-      Q    = X * wq       K = X * wk       V = X * wv    T x d
+      Q    = X * query_weight       K = X * key_weight       V = X * value_weight    T x d
       U    = Q * Kᵀ                                      T x T
       S    = U / sqrt(d)
       M    = S with -1.0e9 added above the diagonal
       A    = softmax of each row of M                    T x T
       C    = A * V                                       T x d
-      O    = C * wo                                      T x d
+      O    = C * output_weight                                      T x d
       Z    = O * projection                              T x v
 
   Three details do all the work. **Positions are added, not concatenated**,
@@ -38,13 +38,13 @@ defmodule TinyLlm.Attention do
 
       dZ = (p - onehot(y)) / N          N is total tokens, not sentences
       dprojection = Oᵀ * dZ             dO = dZ * projectionᵀ
-      dwo = Cᵀ * dO                     dC = dO * woᵀ
+      doutput_weight = Cᵀ * dO                     dC = dO * woᵀ
       dA = dC * Vᵀ                      dV = Aᵀ * dC
       dM[t][j] = A[t][j] * (dA[t][j] - dot(dA[t], A[t]))      (the Jacobian)
       dS = dM                           the mask is additive, so it vanishes
       dU = dS / sqrt(d)
       dQ = dU * K                       dK = dUᵀ * Q          (mind the ᵀ)
-      dwq = Xᵀ * dQ    dwk = Xᵀ * dK    dwv = Xᵀ * dV
+      dquery_weight = Xᵀ * dQ    dkey_weight = Xᵀ * dK    dvalue_weight = Xᵀ * dV
       dX = dQ*wqᵀ + dK*wkᵀ + dV*wvᵀ     three paths, summed
       dembeddings[a_t] += dX[t]         dpositions[t] += dX[t]
 
@@ -58,7 +58,7 @@ defmodule TinyLlm.Attention do
 
   Stage 3 drew every matrix from `-0.02..0.02` and trained fine, because its
   path was two factors deep. The score path here is four factors deep before
-  the gradient turns around, and at 0.02 the gradient reaching `wq` is
+  the gradient turns around, and at 0.02 the gradient reaching `query_weight` is
   1.1e-12: the loss sits on `ln(32)` unchanged for 500 steps, with a
   completely correct backward pass underneath it. Scale each matrix by its
   own shape instead, `sqrt(6 / (fan_in + fan_out))`, and the same code
@@ -101,19 +101,6 @@ defmodule TinyLlm.Attention do
   def mask_value, do: -1.0e9
 
   @doc """
-  The scale to draw a `fan_in` by `fan_out` matrix at.
-
-  `sqrt(6 / (fan_in + fan_out))` gives a uniform draw the variance that
-  keeps activations from growing or shrinking as they pass through a layer.
-  It is the same argument the `sqrt(d)` in the scores makes, applied to the
-  parameters instead of the scores.
-  """
-  @spec fan_scale(pos_integer(), pos_integer()) :: float()
-  def fan_scale(fan_in, fan_out) do
-    :math.sqrt(6 / (fan_in + fan_out))
-  end
-
-  @doc """
   Random starting parameters: two lookup tables and five matrices.
 
   `positions` gets one row per position the context can hold, not one per
@@ -128,13 +115,13 @@ defmodule TinyLlm.Attention do
     c = config.context_length
 
     %{
-      embeddings: Tensor.random(v, d, fan_scale(v, d)),
-      positions: Tensor.random(c, d, fan_scale(c, d)),
-      wq: Tensor.random(d, d, fan_scale(d, d)),
-      wk: Tensor.random(d, d, fan_scale(d, d)),
-      wv: Tensor.random(d, d, fan_scale(d, d)),
-      wo: Tensor.random(d, d, fan_scale(d, d)),
-      projection: Tensor.random(d, v, fan_scale(d, v))
+      embeddings: Tensor.random(v, d, Tensor.fan_scale(v, d)),
+      positions: Tensor.random(c, d, Tensor.fan_scale(c, d)),
+      query_weight: Tensor.random(d, d, Tensor.fan_scale(d, d)),
+      key_weight: Tensor.random(d, d, Tensor.fan_scale(d, d)),
+      value_weight: Tensor.random(d, d, Tensor.fan_scale(d, d)),
+      output_weight: Tensor.random(d, d, Tensor.fan_scale(d, d)),
+      projection: Tensor.random(d, v, Tensor.fan_scale(d, v))
     }
   end
 
@@ -178,9 +165,9 @@ defmodule TinyLlm.Attention do
 
     input = Tensor.add(embeddings, positions)
 
-    queries = Tensor.matmul(input, params.wq)
-    keys = Tensor.matmul(input, params.wk)
-    values = Tensor.matmul(input, params.wv)
+    queries = Tensor.matmul(input, params.query_weight)
+    keys = Tensor.matmul(input, params.key_weight)
+    values = Tensor.matmul(input, params.value_weight)
 
     weights =
       queries
@@ -194,7 +181,7 @@ defmodule TinyLlm.Attention do
       |> Tensor.softmax()
 
     context = Tensor.matmul(weights, values)
-    output = Tensor.matmul(context, params.wo)
+    output = Tensor.matmul(context, params.output_weight)
     logits = Tensor.matmul(output, params.projection)
 
     %{
@@ -296,8 +283,8 @@ defmodule TinyLlm.Attention do
     dprojection = Tensor.matmul(Tensor.transpose(cache.output), dlogits)
     doutput = Tensor.matmul(dlogits, Tensor.transpose(params.projection))
 
-    dwo = Tensor.matmul(Tensor.transpose(cache.context), doutput)
-    dcontext = Tensor.matmul(doutput, Tensor.transpose(params.wo))
+    doutput_weight = Tensor.matmul(Tensor.transpose(cache.context), doutput)
+    dcontext = Tensor.matmul(doutput, Tensor.transpose(params.output_weight))
 
     dweights = Tensor.matmul(dcontext, Tensor.transpose(cache.values))
     dvalues = Tensor.matmul(Tensor.transpose(cache.weights), dcontext)
@@ -316,9 +303,9 @@ defmodule TinyLlm.Attention do
 
     # The input fed all three projections, so all three send gradient back
     # and the three contributions add.
-    from_queries = Tensor.matmul(dqueries, Tensor.transpose(params.wq))
-    from_keys = Tensor.matmul(dkeys, Tensor.transpose(params.wk))
-    from_values = Tensor.matmul(dvalues, Tensor.transpose(params.wv))
+    from_queries = Tensor.matmul(dqueries, Tensor.transpose(params.query_weight))
+    from_keys = Tensor.matmul(dkeys, Tensor.transpose(params.key_weight))
+    from_values = Tensor.matmul(dvalues, Tensor.transpose(params.value_weight))
     dinput = from_queries |> Tensor.add(from_keys) |> Tensor.add(from_values)
 
     {dembeddings, dpositions} = scatter(params, input_ids, dinput)
@@ -327,10 +314,10 @@ defmodule TinyLlm.Attention do
       embeddings: dembeddings,
       positions: dpositions,
       projection: dprojection,
-      wk: Tensor.matmul(input_transposed, dkeys),
-      wo: dwo,
-      wq: Tensor.matmul(input_transposed, dqueries),
-      wv: Tensor.matmul(input_transposed, dvalues)
+      key_weight: Tensor.matmul(input_transposed, dkeys),
+      output_weight: doutput_weight,
+      query_weight: Tensor.matmul(input_transposed, dqueries),
+      value_weight: Tensor.matmul(input_transposed, dvalues)
     }
   end
 
