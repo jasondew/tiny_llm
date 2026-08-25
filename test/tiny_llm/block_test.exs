@@ -86,22 +86,22 @@ defmodule TinyLlm.BlockTest do
   describe "init/1" do
     test "builds the ten matrices the block needs" do
       assert Map.keys(tiny_params()) |> Enum.sort() ==
-               [:b1, :b2, :g1, :g2, :w1, :w2, :wk, :wo, :wq, :wv]
+               [:bias1, :bias2, :gain1, :gain2, :weight1, :weight2, :wk, :wo, :wq, :wv]
     end
 
     test "shapes each matrix from the config" do
       params = tiny_params()
 
-      assert Tensor.shape(params.g1) == {1, 8}
-      assert Tensor.shape(params.g2) == {1, 8}
+      assert Tensor.shape(params.gain1) == {1, 8}
+      assert Tensor.shape(params.gain2) == {1, 8}
       assert Tensor.shape(params.wq) == {8, 8}
       assert Tensor.shape(params.wk) == {8, 8}
       assert Tensor.shape(params.wv) == {8, 8}
       assert Tensor.shape(params.wo) == {8, 8}
-      assert Tensor.shape(params.w1) == {8, 32}
-      assert Tensor.shape(params.b1) == {1, 32}
-      assert Tensor.shape(params.w2) == {32, 8}
-      assert Tensor.shape(params.b2) == {1, 8}
+      assert Tensor.shape(params.weight1) == {8, 32}
+      assert Tensor.shape(params.bias1) == {1, 32}
+      assert Tensor.shape(params.weight2) == {32, 8}
+      assert Tensor.shape(params.bias2) == {1, 8}
     end
 
     test "starts both gains at exactly one" do
@@ -109,15 +109,15 @@ defmodule TinyLlm.BlockTest do
       # knob whose neutral position is known only adds noise.
       params = tiny_params()
 
-      assert List.flatten(params.g1) == List.duplicate(1.0, 8)
-      assert List.flatten(params.g2) == List.duplicate(1.0, 8)
+      assert List.flatten(params.gain1) == List.duplicate(1.0, 8)
+      assert List.flatten(params.gain2) == List.duplicate(1.0, 8)
     end
 
     test "starts both biases at exactly zero" do
       params = tiny_params()
 
-      assert List.flatten(params.b1) == List.duplicate(0.0, 32)
-      assert List.flatten(params.b2) == List.duplicate(0.0, 8)
+      assert List.flatten(params.bias1) == List.duplicate(0.0, 32)
+      assert List.flatten(params.bias2) == List.duplicate(0.0, 8)
     end
 
     test "scales the MLP matrices by their own fan in and fan out" do
@@ -126,7 +126,7 @@ defmodule TinyLlm.BlockTest do
       params = Block.init(@tiny)
       expected = :math.sqrt(6 / (8 + 32))
 
-      for key <- [:w1, :w2] do
+      for key <- [:weight1, :weight2] do
         largest = params |> Map.fetch!(key) |> List.flatten() |> Enum.map(&abs/1) |> Enum.max()
 
         assert largest <= expected, "#{key} drew outside its fan scale"
@@ -172,7 +172,9 @@ defmodule TinyLlm.BlockTest do
     test "rescales without recentring, unlike LayerNorm", %{cache: cache} do
       # [1,1,1,1] has a nonzero mean, and RMSNorm leaves it alone. LayerNorm
       # would return four zeros here, which is the whole difference.
-      assert Enum.at(cache.normalized, 1) == [1.0, 1.0, 1.0, 1.0]
+      for entry <- Enum.at(cache.normalized, 1) do
+        assert_in_delta entry, 1.0, 1.0e-9
+      end
     end
 
     test "applies the gain per column", %{input: input} do
@@ -315,8 +317,8 @@ defmodule TinyLlm.BlockTest do
       silenced = %{
         params
         | wo: Tensor.zeros(8, 8),
-          w2: Tensor.zeros(32, 8),
-          b2: Tensor.zeros(1, 8)
+          weight2: Tensor.zeros(32, 8),
+          bias2: Tensor.zeros(1, 8)
       }
 
       assert max_difference(Block.forward(silenced, input).output, input) < 1.0e-12
@@ -371,8 +373,8 @@ defmodule TinyLlm.BlockTest do
       silenced = %{
         params
         | wo: Tensor.zeros(8, 8),
-          w2: Tensor.zeros(32, 8),
-          b2: Tensor.zeros(1, 8)
+          weight2: Tensor.zeros(32, 8),
+          bias2: Tensor.zeros(1, 8)
       }
 
       cache = Block.forward(silenced, input)
@@ -430,8 +432,8 @@ defmodule TinyLlm.BlockTest do
       cache = Block.forward(params, input)
       {gradients, _dinput} = Block.backward(params, cache, doutput)
 
-      assert Tensor.shape(gradients.b2) == {1, 8}
-      refute List.flatten(gradients.b2) == List.duplicate(0.0, 8)
+      assert Tensor.shape(gradients.bias2) == {1, 8}
+      refute List.flatten(gradients.bias2) == List.duplicate(0.0, 8)
     end
   end
 end

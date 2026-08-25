@@ -22,6 +22,16 @@ defmodule TinyLlm.Tensor do
   end
 
   @doc """
+  A `rows` by `columns` matrix of ones.
+  """
+  @spec ones(non_neg_integer(), non_neg_integer()) :: matrix()
+  def ones(rows, columns) do
+    for _row <- 1..rows//1 do
+      for _column <- 1..columns//1, do: 1.0
+    end
+  end
+
+  @doc """
   A `rows` by `columns` matrix drawn uniformly from `-scale..scale`.
 
   Draws from the process `:rand` state, so seeding the process makes the

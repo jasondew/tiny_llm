@@ -78,7 +78,7 @@ defmodule TinyLlm.Block do
   zeros rather than to NaN.
   """
   @spec epsilon() :: float()
-  def epsilon, do: 1.0e-8
+  def epsilon, do: 1.0e-12
 
   @doc """
   The MLP's hidden width: four times `d_model`, as the brief specifies.
@@ -87,7 +87,7 @@ defmodule TinyLlm.Block do
   deriving it here keeps it out of `Train.Config`, which stage 3 shares.
   """
   @spec hidden_width(pos_integer()) :: pos_integer()
-  def hidden_width(_d_model), do: raise("TODO: stage 5")
+  def hidden_width(d_model), do: 4 * d_model
 
   @doc """
   Random starting parameters for one block.
@@ -98,7 +98,18 @@ defmodule TinyLlm.Block do
   would only add noise to a knob that is already where it should be.
   """
   @spec init(Train.Config.t()) :: Train.params()
-  def init(_config), do: raise("TODO: stage 5")
+  def init(%{d_model: d_model}) do
+    d_hidden = hidden_width(d_model)
+
+    %{
+      gain1: Tensor.ones(1, d_model),
+      gain2: Tensor.ones(1, d_model),
+      weight1: Tensor.random(d_model, d_hidden),
+      bias1: Tensor.zeros(1, d_hidden),
+      weight2: Tensor.random(d_hidden, d_model),
+      bias2: Tensor.zeros(1, d_model)
+    }
+  end
 
   @doc """
   Root-mean-square normalization of every row, scaled by a learned gain.
@@ -111,7 +122,29 @@ defmodule TinyLlm.Block do
   pass needs both, and recomputing them there is where the two drift apart.
   """
   @spec rmsnorm(Tensor.matrix(), Tensor.matrix()) :: norm_cache()
-  def rmsnorm(_input, _gain), do: raise("TODO: stage 5")
+  def rmsnorm(input, [gain]) do
+    rms =
+      for row <- input do
+        sum_of_squares = Enum.reduce(row, 0.0, fn x, acc -> acc + x * x end)
+        :math.sqrt(sum_of_squares / length(row) + epsilon())
+      end
+
+    normalized =
+      for {row, r} <- Enum.zip(input, rms) do
+        Enum.map(row, fn x -> x / r end)
+      end
+
+    output =
+      for row <- normalized do
+        Enum.zip_with(row, gain, fn n, g -> n * g end)
+      end
+
+    %{
+      output: output,
+      normalized: normalized,
+      rms: rms
+    }
+  end
 
   @doc """
   The gradient of `rmsnorm/2`, as `{dgain, dinput}`.
