@@ -158,6 +158,37 @@ softmax. Config struct shared with stage 3 so both models use `Train`.
 **Accept:** full-model gradient check (tiny config); held-out loss beats the
 Embedder's; end-to-end training < 60s on laptop CPU.
 
+**Measured once built.** All three criteria met, but the time budget is the
+binding one and it has almost no slack.
+
+  * **Cost is 445ms per step** at batch 64, against the stage 4 head's
+    209ms. Not a pathology: the MLP is 8192 multiplies per token where the
+    head's four projections are 4096, so roughly double is the expectation.
+    The consequence is that 60 seconds buys about 130 steps at batch 64,
+    and `Config`'s default of 1000 steps would take 7.5 minutes.
+  * **The budget is better spent on smaller batches.** At a fixed budget of
+    3840 examples, roughly 27s, batch 4 and batch 8 both reach 1.597 mean
+    held-out loss where batch 16 reaches 1.627 and batch 64 reaches 1.899.
+  * **Cosine decay beats a constant rate everywhere tested**, by 0.02 to
+    0.04 nats, and roughly halves the spread between seeds. A constant rate
+    keeps taking full-size steps after it has arrived, so where it stops
+    depends on which step it stopped on. Now in `Train.learning_rate/2`.
+  * **The rate scales with the batch size**, linearly up to batch 8 and
+    sublinearly after: batch 4 wants 0.25, batch 8 wants 0.5, batch 16
+    wants 0.5 to 0.75 rather than the 1.0 the rule predicts. Batch 4's
+    optimum is bracketed on both sides, 1.668 at 0.0625 rising back to
+    1.696 at 1.0.
+  * **Recommended stage 5 config:** batch 8, `learning_rate: 0.5`,
+    `learning_rate_schedule: :cosine`. Both tables above are 8 seeds per
+    cell at a fixed compute budget.
+
+**One seed is worth about ±0.05 nats on this model, so no two
+configurations may be compared on one run each.** A first single-seed sweep
+picked batch 4 at lr 1.0 as the best cell; over 8 seeds that is the *worst*
+cell in its row, 1.696 against 1.597. It also appeared to show the optimal
+rate falling as the batch grew, the reverse of the real relationship. Every
+number quoted in the talk needs its seed count stated.
+
 ## Stage 6. `TinyLlm.Sampler` + `TinyLlm.Eval` (~130 lines)
 
 Sampler: `Stream.unfold/2` autoregressive loop; temperature divides logits

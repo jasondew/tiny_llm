@@ -48,6 +48,38 @@ defmodule TinyLlm.TrainTest do
     {:ok, config: config, result: Train.run(config)}
   end
 
+  describe "learning_rate/2" do
+    test "a constant schedule ignores the step" do
+      config = %Train.Config{learning_rate: 0.5, steps: 100}
+
+      assert Train.learning_rate(config, 0) == 0.5
+      assert Train.learning_rate(config, 50) == 0.5
+      assert Train.learning_rate(config, 100) == 0.5
+    end
+
+    test "cosine starts at the full rate, halves at the midpoint, and ends at zero" do
+      # Ending at zero is the point: a constant rate keeps taking full-size
+      # steps after it has arrived, so where it stops depends on which step
+      # it stopped on. Measured over 8 seeds, decaying halved the spread.
+      config = %Train.Config{learning_rate: 0.5, learning_rate_schedule: :cosine, steps: 100}
+
+      assert_in_delta Train.learning_rate(config, 0), 0.5, 1.0e-12
+      assert_in_delta Train.learning_rate(config, 50), 0.25, 1.0e-12
+      assert_in_delta Train.learning_rate(config, 100), 0.0, 1.0e-12
+    end
+
+    test "cosine never rises" do
+      config = %Train.Config{learning_rate: 1.0, learning_rate_schedule: :cosine, steps: 40}
+      rates = Enum.map(0..40, fn step -> Train.learning_rate(config, step) end)
+
+      assert rates == Enum.sort(rates, :desc)
+    end
+
+    test "defaults to constant, so stage 3 is unaffected" do
+      assert %Train.Config{}.learning_rate_schedule == :constant
+    end
+  end
+
   describe "Config" do
     test "defaults to the architecture the brief fixes" do
       config = %Train.Config{}
