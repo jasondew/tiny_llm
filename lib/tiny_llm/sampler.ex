@@ -23,9 +23,9 @@ defmodule TinyLlm.Sampler do
 
   ## Temperature
 
-  Temperature divides the logits before the softmax, which is the only
-  place it can go: dividing after would need renormalizing, and that is the
-  softmax again.
+  Temperature divides the logits before the softmax:
+
+      p_i = exp(z_i / t) / sum of exp(z_j / t)
 
       temperature -> 0    argmax, the single most likely word every time
       temperature = 1     the model's own distribution, unmodified
@@ -35,6 +35,18 @@ defmodule TinyLlm.Sampler do
   above 1 they narrow and it flattens. At exactly 0 the arithmetic divides
   by zero, so `0.0` is special-cased to `argmax`, which is what the limit
   approaches anyway.
+
+  There is a second, identical formulation that works on the probabilities
+  instead: raise each to the power `1/t` and renormalize. Substituting
+  `p_i = exp(z_i)/Z` makes the `Z^(1/t)` cancel, leaving the expression
+  above. What does *not* work is dividing the probabilities by `t` and
+  renormalizing, and it fails silently: linear rescaling cancels completely
+  and hands back the distribution unchanged, so temperature appears to have
+  no effect at all.
+
+  Dividing the logits is the one to implement regardless, since it reuses
+  the max-subtraction guard inside `Tensor.softmax/1` and normalizes once
+  rather than twice.
 
   This is the knob the stage 7 Livebook puts a slider on, because watching
   a grammatical sentence turn to noise as it rises says more about what a

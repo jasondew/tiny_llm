@@ -89,9 +89,15 @@ defmodule TinyLlm.SamplerTest do
     test "temperature divides the logits, it does not reweight the probabilities", %{
       params: params
     } do
-      # Applying temperature after the softmax is the tempting mistake: it
-      # needs renormalizing afterwards, which is the softmax again, and it
-      # gives a different answer. Check against the definition.
+      # Two formulations are correct and identical: softmax(z / t), and
+      # raising the probabilities to the power 1/t and renormalizing. The
+      # exp(z_i)/Z substitution makes the Z^(1/t) cancel. Dividing the
+      # probabilities by t and renormalizing is the actual mistake, and it
+      # is a silent one: linear rescaling cancels completely and returns the
+      # distribution unchanged, so temperature appears to do nothing.
+      #
+      # Dividing the logits is the implementation to prefer anyway: it
+      # reuses softmax's max-subtraction guard and normalizes once.
       prefix = ["<start>", "the"]
       logits = Model.forward(params, Vocab.encode(prefix)).logits |> List.last()
 
