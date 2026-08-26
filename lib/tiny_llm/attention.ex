@@ -76,9 +76,20 @@ defmodule TinyLlm.Attention do
   @type example :: {[Vocab.id()], [Vocab.id()]}
 
   @typedoc """
-  Everything one forward pass produced. The backward pass reads almost all
-  of it, and `:weights` is what the stage 7 heatmap plots.
+  Everything the head produced. The backward pass reads almost all of it,
+  and `:weights` is what the stage 7 heatmap plots.
   """
+  @type head_cache :: %{
+          input: Tensor.matrix(),
+          queries: Tensor.matrix(),
+          keys: Tensor.matrix(),
+          values: Tensor.matrix(),
+          weights: Tensor.matrix(),
+          context: Tensor.matrix(),
+          output: Tensor.matrix()
+        }
+
+  @typedoc "The head's cache, plus the logits `forward/2` adds on the end."
   @type cache :: %{
           input: Tensor.matrix(),
           queries: Tensor.matrix(),
@@ -158,12 +169,27 @@ defmodule TinyLlm.Attention do
       raise ArgumentError, "Sequence too long: #{length(input_ids)} > #{length(params.positions)}"
     end
 
-    d_model = length(hd(params.embeddings))
-
     embeddings = Enum.map(input_ids, fn id -> Enum.at(params.embeddings, id) end)
     positions = Enum.take(params.positions, length(input_ids))
-
     input = Tensor.add(embeddings, positions)
+
+    cache = attend(params, input)
+
+    Map.put(cache, :logits, Tensor.matmul(cache.output, params.projection))
+  end
+
+  @doc """
+  The head on its own, over an arbitrary `T` by `d` matrix.
+
+  `forward/2` is this plus a lookup on the front and an unembedding on the
+  back. Stage 5 wraps it in a normalization and a residual instead, and the
+  head cannot tell the difference: it takes rows in and gives rows out.
+
+  Nothing here mentions token ids or the vocabulary, which is the point.
+  """
+  @spec attend(Train.params(), Tensor.matrix()) :: head_cache()
+  def attend(params, input) do
+    d_model = length(hd(input))
 
     queries = Tensor.matmul(input, params.query_weight)
     keys = Tensor.matmul(input, params.key_weight)
@@ -181,8 +207,6 @@ defmodule TinyLlm.Attention do
       |> Tensor.softmax()
 
     context = Tensor.matmul(weights, values)
-    output = Tensor.matmul(context, params.output_weight)
-    logits = Tensor.matmul(output, params.projection)
 
     %{
       input: input,
@@ -191,9 +215,55 @@ defmodule TinyLlm.Attention do
       values: values,
       weights: weights,
       context: context,
-      output: output,
-      logits: logits
+      output: Tensor.matmul(context, params.output_weight)
     }
+  end
+
+  @doc """
+  The gradient of `attend/2`, as `{gradients, dinput}`.
+
+  `gradients` covers the four projections and nothing else. `dinput` is what
+  the caller adds to whatever else feeds the head's input: an embedding
+  table in stage 4, a residual stream in stage 5.
+  """
+  @spec attend_backward(Train.params(), head_cache(), Tensor.matrix()) ::
+          {Train.params(), Tensor.matrix()}
+  def attend_backward(params, cache, doutput) do
+    d_model = length(hd(cache.input))
+
+    doutput_weight = Tensor.matmul(Tensor.transpose(cache.context), doutput)
+    dcontext = Tensor.matmul(doutput, Tensor.transpose(params.output_weight))
+
+    dweights = Tensor.matmul(dcontext, Tensor.transpose(cache.values))
+    dvalues = Tensor.matmul(Tensor.transpose(cache.weights), dcontext)
+
+    # The mask was additive and the masked weights are exactly 0.0, so the
+    # mask needs no code here at all: those entries come back exactly 0.0.
+    dmasked = softmax_backward(cache.weights, dweights)
+    dscores = Tensor.scale(dmasked, 1 / :math.sqrt(d_model))
+
+    # Mind the transpose. `matmul(dscores, queries)` has the same shape and
+    # only the gradient check can tell the two apart.
+    dqueries = Tensor.matmul(dscores, cache.keys)
+    dkeys = Tensor.matmul(Tensor.transpose(dscores), cache.queries)
+
+    input_transposed = Tensor.transpose(cache.input)
+
+    # The input fed all three projections, so all three send gradient back
+    # and the three contributions add.
+    from_queries = Tensor.matmul(dqueries, Tensor.transpose(params.query_weight))
+    from_keys = Tensor.matmul(dkeys, Tensor.transpose(params.key_weight))
+    from_values = Tensor.matmul(dvalues, Tensor.transpose(params.value_weight))
+    dinput = from_queries |> Tensor.add(from_keys) |> Tensor.add(from_values)
+
+    gradients = %{
+      query_weight: Tensor.matmul(input_transposed, dqueries),
+      key_weight: Tensor.matmul(input_transposed, dkeys),
+      value_weight: Tensor.matmul(input_transposed, dvalues),
+      output_weight: doutput_weight
+    }
+
+    {gradients, dinput}
   end
 
   @doc """
@@ -269,7 +339,7 @@ defmodule TinyLlm.Attention do
   # a parameter and what it passes further back.
   defp example_gradients(params, input_ids, target_ids) do
     cache = forward(params, input_ids)
-    {vocabulary_size, d_model} = Tensor.shape(params.embeddings)
+    {vocabulary_size, _d_model} = Tensor.shape(params.embeddings)
 
     # Cross-entropy through softmax collapses to p - onehot, exactly as in
     # the Embedder, one row per predicted position.
@@ -283,42 +353,14 @@ defmodule TinyLlm.Attention do
     dprojection = Tensor.matmul(Tensor.transpose(cache.output), dlogits)
     doutput = Tensor.matmul(dlogits, Tensor.transpose(params.projection))
 
-    doutput_weight = Tensor.matmul(Tensor.transpose(cache.context), doutput)
-    dcontext = Tensor.matmul(doutput, Tensor.transpose(params.output_weight))
-
-    dweights = Tensor.matmul(dcontext, Tensor.transpose(cache.values))
-    dvalues = Tensor.matmul(Tensor.transpose(cache.weights), dcontext)
-
-    # The mask was additive and the masked weights are exactly 0.0, so the
-    # mask needs no code here at all: those entries come back exactly 0.0.
-    dmasked = softmax_backward(cache.weights, dweights)
-    dscores = Tensor.scale(dmasked, 1 / :math.sqrt(d_model))
-
-    # Mind the transpose. `matmul(dscores, queries)` has the same shape and
-    # only the gradient check can tell the two apart.
-    dqueries = Tensor.matmul(dscores, cache.keys)
-    dkeys = Tensor.matmul(Tensor.transpose(dscores), cache.queries)
-
-    input_transposed = Tensor.transpose(cache.input)
-
-    # The input fed all three projections, so all three send gradient back
-    # and the three contributions add.
-    from_queries = Tensor.matmul(dqueries, Tensor.transpose(params.query_weight))
-    from_keys = Tensor.matmul(dkeys, Tensor.transpose(params.key_weight))
-    from_values = Tensor.matmul(dvalues, Tensor.transpose(params.value_weight))
-    dinput = from_queries |> Tensor.add(from_keys) |> Tensor.add(from_values)
-
+    {head_gradients, dinput} = attend_backward(params, cache, doutput)
     {dembeddings, dpositions} = scatter(params, input_ids, dinput)
 
-    %{
+    Map.merge(head_gradients, %{
       embeddings: dembeddings,
       positions: dpositions,
-      projection: dprojection,
-      key_weight: Tensor.matmul(input_transposed, dkeys),
-      output_weight: doutput_weight,
-      query_weight: Tensor.matmul(input_transposed, dqueries),
-      value_weight: Tensor.matmul(input_transposed, dvalues)
-    }
+      projection: dprojection
+    })
   end
 
   # dM[t][j] = A[t][j] * (dA[t][j] - dot(dA[t], A[t]))
