@@ -71,7 +71,21 @@ defmodule TinyLlm.Model do
   """
   @impl Train
   @spec init(Train.Config.t()) :: Train.params()
-  def init(_config), do: raise("TODO: stage 5")
+  def init(config) do
+    v = config.vocabulary_size
+    d = config.d_model
+    c = config.context_length
+
+    Map.merge(
+      Block.init(config),
+      %{
+        embeddings: Tensor.random(v, d, Tensor.fan_scale(v, d)),
+        positions: Tensor.random(c, d, Tensor.fan_scale(c, d)),
+        projection: Tensor.random(d, v, Tensor.fan_scale(d, v)),
+        gain3: Tensor.ones(1, d)
+      }
+    )
+  end
 
   @doc """
   A corpus of sentences as `{input_ids, target_ids}` pairs.
@@ -82,31 +96,135 @@ defmodule TinyLlm.Model do
   """
   @impl Train
   @spec examples([Grammar.sentence()]) :: [example()]
-  def examples(_corpus), do: raise("TODO: stage 5")
+  def examples(corpus) do
+    Attention.examples(corpus)
+  end
 
   @doc """
   One forward pass, keeping every intermediate the backward pass needs.
   """
   @spec forward(Train.params(), [Vocab.id()]) :: cache()
-  def forward(_params, _input_ids), do: raise("TODO: stage 5")
+  def forward(params, input_ids) do
+    if length(input_ids) > length(params.positions) do
+      raise ArgumentError, "Sequence too long: #{length(input_ids)} > #{length(params.positions)}"
+    end
+
+    embeddings = Enum.map(input_ids, fn id -> Enum.at(params.embeddings, id) end)
+    positions = Enum.take(params.positions, length(input_ids))
+    input = Tensor.add(embeddings, positions)
+
+    block = Block.forward(params, input)
+    norm3 = Block.rmsnorm(block.output, params.gain3)
+    logits = Tensor.matmul(norm3.output, params.projection)
+
+    %{
+      input: input,
+      block: block,
+      norm3: norm3,
+      logits: logits
+    }
+  end
 
   @doc """
   The attention matrix on its own, for the stage 7 heatmap.
   """
   @spec weights(Train.params(), [Vocab.id()]) :: Tensor.matrix()
-  def weights(_params, _input_ids), do: raise("TODO: stage 5")
+  def weights(params, input_ids) do
+    forward(params, input_ids).block.attention.weights
+  end
 
   @doc """
   Mean cross-entropy over a batch, in nats, averaged over predicted tokens.
   """
   @impl Train
   @spec loss(Train.params(), [example()]) :: float()
-  def loss(_params, _batch), do: raise("TODO: stage 5")
+  def loss(params, batch) do
+    {summed_loss, token_count} =
+      Enum.reduce(
+        batch,
+        {0.0, 0},
+        fn {input_ids, target_ids}, {loss_so_far, tokens_so_far} ->
+          logits = forward(params, input_ids).logits
+
+          sequence_loss =
+            Enum.zip_reduce(logits, target_ids, 0.0, fn row, target_id, accumulated ->
+              accumulated + Tensor.cross_entropy(row, target_id)
+            end)
+
+          {loss_so_far + sequence_loss, tokens_so_far + length(target_ids)}
+        end
+      )
+
+    summed_loss / token_count
+  end
 
   @doc """
   Mean gradients over a batch, keyed exactly like the params.
   """
   @impl Train
   @spec gradients(Train.params(), [example()]) :: Train.params()
-  def gradients(_params, _batch), do: raise("TODO: stage 5")
+  def gradients(params, batch) do
+    {summed, token_count} =
+      Enum.reduce(
+        batch,
+        {Train.zero_gradients(params), 0},
+        fn {input_ids, target_ids}, {totals, count_so_far} ->
+          contribution = example_gradients(params, input_ids, target_ids)
+
+          {Train.add_gradients(totals, contribution), count_so_far + length(target_ids)}
+        end
+      )
+
+    Map.new(
+      summed,
+      fn {key, gradient} -> {key, Tensor.scale(gradient, 1 / token_count)} end
+    )
+  end
+
+  ## PRIVATE FUNCTIONS
+
+  # One example's contribution. Model owns only the two ends of the chain:
+  # the loss and the unembedding on one side, the tables on the other.
+  # Everything between is Block, and everything inside that is Attention.
+  defp example_gradients(params, input_ids, target_ids) do
+    cache = forward(params, input_ids)
+    {vocabulary_size, _d_model} = Tensor.shape(params.embeddings)
+
+    dlogits =
+      Enum.zip_with(cache.logits, target_ids, fn row, target_id ->
+        [probabilities] = Tensor.softmax([row])
+
+        Enum.zip_with(probabilities, Tensor.one_hot(target_id, vocabulary_size), &-/2)
+      end)
+
+    dprojection = Tensor.matmul(Tensor.transpose(cache.norm3.output), dlogits)
+    dnorm3 = Tensor.matmul(dlogits, Tensor.transpose(params.projection))
+
+    {dgain3, dblock} = Block.rmsnorm_backward(cache.norm3, params.gain3, dnorm3)
+    {block_gradients, dinput} = Block.backward(params, cache.block, dblock)
+    {dembeddings, dpositions} = scatter(params, input_ids, dinput)
+
+    Map.merge(block_gradients, %{
+      embeddings: dembeddings,
+      positions: dpositions,
+      gain3: dgain3,
+      projection: dprojection
+    })
+  end
+
+  # Row t of dinput is filed twice: under the token that sat there, and
+  # under the position it sat in. Summing either table down its columns
+  # gives the identical row, which is the free check.
+  defp scatter(params, input_ids, dinput) do
+    {vocabulary_size, d_model} = Tensor.shape(params.embeddings)
+    {context_length, _d_model} = Tensor.shape(params.positions)
+    empty = {Tensor.zeros(vocabulary_size, d_model), Tensor.zeros(context_length, d_model)}
+
+    input_ids
+    |> Enum.zip(dinput)
+    |> Enum.with_index()
+    |> Enum.reduce(empty, fn {{input_id, drow}, position}, {dembeddings, dpositions} ->
+      {Tensor.add_row(dembeddings, input_id, drow), Tensor.add_row(dpositions, position, drow)}
+    end)
+  end
 end

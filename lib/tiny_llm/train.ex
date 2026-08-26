@@ -128,6 +128,30 @@ defmodule TinyLlm.Train do
   end
 
   @doc """
+  A gradient accumulator: the same keys as `params`, every matrix zeroed.
+  """
+  @spec zero_gradients(params()) :: params()
+  def zero_gradients(params) do
+    Map.new(params, fn {key, matrix} ->
+      {rows, columns} = Tensor.shape(matrix)
+
+      {key, Tensor.zeros(rows, columns)}
+    end)
+  end
+
+  @doc """
+  Two gradient maps added key by key.
+
+  Lives here rather than in a model because it is the same arithmetic
+  `step/4` does: params and gradients are maps with the same keys, and
+  nothing about that needs to know what a key means.
+  """
+  @spec add_gradients(params(), params()) :: params()
+  def add_gradients(left, right) do
+    Map.new(left, fn {key, matrix} -> {key, Tensor.add(matrix, Map.fetch!(right, key))} end)
+  end
+
+  @doc """
   A random batch of `size` examples, drawn with replacement.
   """
   @spec batch([example()], pos_integer()) :: [example()]

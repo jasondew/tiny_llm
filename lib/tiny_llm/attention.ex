@@ -300,7 +300,7 @@ defmodule TinyLlm.Attention do
 
           sequence_loss =
             Enum.zip_reduce(logits, target_ids, 0.0, fn row, target_id, accumulated ->
-              accumulated + cross_entropy(row, target_id)
+              accumulated + Tensor.cross_entropy(row, target_id)
             end)
 
           {loss_so_far + sequence_loss, tokens_so_far + length(target_ids)}
@@ -322,11 +322,11 @@ defmodule TinyLlm.Attention do
   @spec gradients(Train.params(), [example()]) :: Train.params()
   def gradients(params, batch) do
     {summed, token_count} =
-      Enum.reduce(batch, {zero_gradients(params), 0}, fn {input_ids, target_ids},
-                                                         {totals, count_so_far} ->
+      Enum.reduce(batch, {Train.zero_gradients(params), 0}, fn {input_ids, target_ids},
+                                                               {totals, count_so_far} ->
         contribution = example_gradients(params, input_ids, target_ids)
 
-        {add_gradients(totals, contribution), count_so_far + length(target_ids)}
+        {Train.add_gradients(totals, contribution), count_so_far + length(target_ids)}
       end)
 
     Map.new(summed, fn {key, gradient} -> {key, Tensor.scale(gradient, 1 / token_count)} end)
@@ -393,39 +393,7 @@ defmodule TinyLlm.Attention do
     |> Enum.zip(dinput)
     |> Enum.with_index()
     |> Enum.reduce(empty, fn {{input_id, drow}, position}, {dembeddings, dpositions} ->
-      {add_row(dembeddings, input_id, drow), add_row(dpositions, position, drow)}
+      {Tensor.add_row(dembeddings, input_id, drow), Tensor.add_row(dpositions, position, drow)}
     end)
-  end
-
-  defp add_row(matrix, index, row) do
-    List.update_at(matrix, index, fn existing -> Enum.zip_with(existing, row, &+/2) end)
-  end
-
-  defp zero_gradients(params) do
-    Map.new(params, fn {key, matrix} ->
-      {rows, columns} = Tensor.shape(matrix)
-
-      {key, Tensor.zeros(rows, columns)}
-    end)
-  end
-
-  defp add_gradients(left, right) do
-    Map.new(left, fn {key, matrix} -> {key, Tensor.add(matrix, Map.fetch!(right, key))} end)
-  end
-
-  # L = max + ln( sum of exp(z_k - max) ) - z_target
-  #
-  # Subtracting the row maximum before exponentiating changes nothing
-  # mathematically and keeps `exp/1` from overflowing on large logits.
-  defp cross_entropy(logits, target_id) do
-    max = Enum.max(logits)
-
-    log_sum_exp =
-      logits
-      |> Enum.map(fn logit -> :math.exp(logit - max) end)
-      |> Enum.sum()
-      |> :math.log()
-
-    max + log_sum_exp - Enum.at(logits, target_id)
   end
 end

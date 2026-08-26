@@ -95,20 +95,8 @@ defmodule TinyLlm.Embedder do
   @impl Train
   @spec loss(Train.params(), [example()]) :: float()
   def loss(params, batch) do
-    # L = max + ln( Σ exp(z_k − max) ) − z_t
-    Enum.reduce(batch, 0.0, fn {input_id, target_id}, acc ->
-      logits = logits(params, input_id)
-      max = Enum.max(logits)
-
-      log_sum_exp =
-        logits
-        |> Enum.map(fn z -> :math.exp(z - max) end)
-        |> Enum.sum()
-        |> :math.log()
-
-      z_t = Enum.at(logits, target_id)
-
-      acc + max + log_sum_exp - z_t
+    Enum.reduce(batch, 0.0, fn {input_id, target_id}, total ->
+      total + Tensor.cross_entropy(logits(params, input_id), target_id)
     end) / length(batch)
   end
 

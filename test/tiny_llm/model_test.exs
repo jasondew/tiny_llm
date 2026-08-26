@@ -26,7 +26,6 @@ defmodule TinyLlm.ModelTest do
   alias TinyLlm.Model
   alias TinyLlm.Tensor
   alias TinyLlm.Train
-  alias TinyLlm.Vocab
 
   @config %Train.Config{model: Model, vocabulary_size: 32, d_model: 32, context_length: 16}
   @tiny %Train.Config{model: Model, vocabulary_size: 6, d_model: 8, context_length: 4}
@@ -157,11 +156,18 @@ defmodule TinyLlm.ModelTest do
 
   describe "loss/2" do
     test "an untrained model pays about ln(vocabulary_size) per token" do
+      # Looser than the Embedder's 0.05 or Attention's 0.25, and the reason
+      # is the third RMSNorm. It hands `projection` rows at RMS 1, so the
+      # initial logits have a standard deviation near 1 rather than near
+      # zero, and a spread of random logits costs more per token than a flat
+      # guess does. Measured 3.78 against ln(32) = 3.47. A model that starts
+      # slightly worse than uniform is normal; one that starts far better
+      # would mean the evaluation set leaked.
       Train.seed(1)
       params = Model.init(@config)
       examples = Model.examples(Grammar.corpus(50))
 
-      assert_in_delta Model.loss(params, examples), :math.log(32), 0.3
+      assert_in_delta Model.loss(params, examples), :math.log(32), 0.5
     end
 
     test "averages over tokens, not over sequences" do

@@ -219,6 +219,46 @@ defmodule TinyLlm.Tensor do
   end
 
   @doc """
+  One row of a matrix, with `row` added to it entry by entry.
+
+  The scatter-add a lookup table's gradient is built from: a token that
+  appears twice in one sequence must accumulate both contributions, so this
+  adds rather than replaces.
+  """
+  @spec add_row(matrix(), non_neg_integer(), row()) :: matrix()
+  def add_row(matrix, index, row) do
+    List.update_at(matrix, index, fn existing -> Enum.zip_with(existing, row, &+/2) end)
+  end
+
+  @doc """
+  The cross-entropy of one row of logits against the id that actually came
+  next, in nats.
+
+      L = max + ln( sum of exp(z_k - max) ) - z_target
+
+  Subtracting the row maximum before exponentiating changes nothing
+  mathematically and keeps `exp/1` from overflowing on large logits. It is
+  the same guard `softmax/1` applies, for the same reason.
+
+  Note this never builds the probability row. Cross-entropy only ever needs
+  one of its entries, and the log of a softmax simplifies to the expression
+  above, so computing all 32 probabilities and taking the log of one would
+  be slower and less accurate.
+  """
+  @spec cross_entropy(row(), non_neg_integer()) :: float()
+  def cross_entropy(logits, target_id) do
+    max = Enum.max(logits)
+
+    log_sum_exp =
+      logits
+      |> Enum.map(fn logit -> :math.exp(logit - max) end)
+      |> Enum.sum()
+      |> :math.log()
+
+    max + log_sum_exp - Enum.at(logits, target_id)
+  end
+
+  @doc """
   The index of the largest entry in a row, earliest index winning ties.
   """
   @spec argmax(row()) :: non_neg_integer()
