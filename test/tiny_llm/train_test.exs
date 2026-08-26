@@ -28,12 +28,17 @@ defmodule TinyLlm.TrainTest do
   # training run is by far the most expensive thing in this suite and every
   # test in "run/1" reads the same result, so it happens once for the file
   # rather than once per test.
+  #
+  # 800 steps rather than the config default of 1000. The Embedder converges
+  # by 800 and then wanders: measured 1.9436 at 800 and 1.9546 at 2000, so
+  # the extra steps cost 9 seconds of suite time and buy a slightly worse
+  # number.
   setup_all do
     config = %Train.Config{
       model: Embedder,
       learning_rate: 1.0,
       batch_size: 64,
-      steps: 2_000,
+      steps: 800,
       log_every: 200,
       training_corpus_size: 2_000,
       evaluation_corpus_size: 500,
@@ -119,12 +124,15 @@ defmodule TinyLlm.TrainTest do
       assert Map.keys(result.params) |> Enum.sort() == [:embeddings, :projection]
     end
 
-    test "logs a loss every log_every steps, starting before any learning", %{result: result} do
+    test "logs a loss every log_every steps, starting before any learning", %{
+      config: config,
+      result: result
+    } do
       steps = Enum.map(result.losses, fn {step, _loss} -> step end)
 
       assert List.first(steps) == 0
       assert steps == Enum.sort(steps)
-      assert length(steps) >= 6
+      assert steps == Enum.to_list(0..config.steps//config.log_every)
     end
 
     test "starts at the cost of knowing nothing, ln(32)", %{result: result} do

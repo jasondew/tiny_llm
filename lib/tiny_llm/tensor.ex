@@ -175,6 +175,13 @@ defmodule TinyLlm.Tensor do
     end
   end
 
+  @spec add_bias(matrix(), matrix()) :: matrix()
+  def add_bias(matrix, [bias]) do
+    for row <- matrix do
+      Enum.zip_with(row, bias, &+/2)
+    end
+  end
+
   @doc """
   Each row divided by its own sum, so every row becomes a distribution.
 

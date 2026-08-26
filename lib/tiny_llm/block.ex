@@ -206,7 +206,28 @@ defmodule TinyLlm.Block do
   One block forward pass, keeping every intermediate the backward pass needs.
   """
   @spec forward(Train.params(), Tensor.matrix()) :: cache()
-  def forward(_params, _input), do: raise("TODO: stage 5")
+  def forward(params, input) do
+    norm1 = rmsnorm(input, params.gain1)
+    attention = Attention.attend(params, norm1.output)
+    residual = Tensor.add(input, attention.output)
+    norm2 = rmsnorm(residual, params.gain2)
+    pre = norm2.output |> Tensor.matmul(params.weight1) |> Tensor.add_bias(params.bias1)
+    hidden = Tensor.map(pre, &max(&1, 0.0))
+    mlp = hidden |> Tensor.matmul(params.weight2) |> Tensor.add_bias(params.bias2)
+    output = Tensor.add(residual, mlp)
+
+    %{
+      input: input,
+      norm1: norm1,
+      attention: attention,
+      residual: residual,
+      norm2: norm2,
+      pre: pre,
+      hidden: hidden,
+      mlp: mlp,
+      output: output
+    }
+  end
 
   @doc """
   The gradient of `forward/2`, as `{gradients, dinput}`.
@@ -216,5 +237,61 @@ defmodule TinyLlm.Block do
   """
   @spec backward(Train.params(), cache(), Tensor.matrix()) ::
           {Train.params(), Tensor.matrix()}
-  def backward(_params, _cache, _doutput), do: raise("TODO: stage 5")
+  def backward(params, cache, doutput) do
+    # Y = R + Mlp, so the residual hands dY to both of its inputs unchanged.
+    dmlp = doutput
+
+    dweight2 = Tensor.matmul(Tensor.transpose(cache.hidden), dmlp)
+    dhidden = Tensor.matmul(dmlp, Tensor.transpose(params.weight2))
+
+    # The ReLU mask reads `pre`, the value before the nonlinearity, not
+    # `hidden` after it. They agree here and the habit survives a
+    # nonlinearity where they do not.
+    dpre =
+      Enum.zip_with(dhidden, cache.pre, fn dhidden_row, pre_row ->
+        Enum.zip_with(dhidden_row, pre_row, fn d, pre -> if pre > 0.0, do: d, else: 0.0 end)
+      end)
+
+    dweight1 = Tensor.matmul(Tensor.transpose(cache.norm2.output), dpre)
+    dnorm2 = Tensor.matmul(dpre, Tensor.transpose(params.weight1))
+
+    {dgain2, dresidual_from_norm} = rmsnorm_backward(cache.norm2, params.gain2, dnorm2)
+
+    # Two contributions meet here: the residual skip and the MLP branch.
+    # Drop either and the loss still falls while only the tables fail.
+    dresidual = Tensor.add(doutput, dresidual_from_norm)
+
+    {head_gradients, dnorm1} = Attention.attend_backward(params, cache.attention, dresidual)
+    {dgain1, dinput_from_norm} = rmsnorm_backward(cache.norm1, params.gain1, dnorm1)
+
+    # The same meeting, one level up.
+    dinput = Tensor.add(dresidual, dinput_from_norm)
+
+    gradients =
+      Map.merge(head_gradients, %{
+        gain1: dgain1,
+        gain2: dgain2,
+        weight1: dweight1,
+        bias1: column_sums(dpre),
+        weight2: dweight2,
+        bias2: column_sums(dmlp)
+      })
+
+    {gradients, dinput}
+  end
+
+  ## PRIVATE FUNCTIONS
+
+  # A bias is added identically to every row, so its gradient is the sum of
+  # the incoming gradient over every row.
+  defp column_sums(matrix) do
+    width = length(hd(matrix))
+
+    summed =
+      Enum.reduce(matrix, List.duplicate(0.0, width), fn row, totals ->
+        Enum.zip_with(totals, row, &+/2)
+      end)
+
+    [summed]
+  end
 end
