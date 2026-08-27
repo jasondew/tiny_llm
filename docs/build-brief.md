@@ -290,12 +290,31 @@ below the random baseline. Do not measure this as cosine against the mean
 offset: every vector contributes to that mean, the bias is upward, and it
 made the verbs look like weak signal rather than none.
 
-A likely reason, and a good beat if it checks out: the embedding table is
-the *input* representation. A noun's number as an input strongly determines
-the verb that follows, so the model has reason to encode it there. A verb's
-number as an input barely matters, since an object or a period follows
-either way. Verb number is something this model must *produce* rather than
-*read*, so it would live in `projection` instead. Untested.
+**Tested, and it holds.** A word's row in `embeddings` is how it is read;
+its column in `projection` is how it is predicted. The same pairwise
+measurement on both:
+
+| | embeddings | projection |
+| --- | --- | --- |
+| random baseline | 0.146 | 0.146 |
+| nouns | 0.372 (0.21 to 0.63) | 0.414 (0.25 to 0.62) |
+| action verbs | 0.105 (−0.00 to 0.35) | **0.487** (0.31 to 0.69) |
+
+Verb number exists **only** in the output representation: no shared
+direction whatsoever going in, a strong one coming out, with every pair
+above 0.31. Noun number exists in both.
+
+That is exactly what the grammar demands. A noun's number has to be
+readable, since it governs the verb that follows, and writable, since the
+model must choose `llama` over `llamas`. A verb's number only ever has to
+be written: nothing downstream of a verb depends on it, so there is no
+pressure to encode it on the way in, and the model did not.
+
+It also justifies the untied unembedding after the fact. Stage 5 chose
+separate tables so the PCA picture would mean one thing; it turns out the
+two tables carry genuinely different information, and tying them would have
+forced one set of vectors to be both "what I read" and "what I predict",
+which for verbs are not the same.
 
 **The temperature slider's range is 0 to 3**, measured. Grammaticality
 falls 100% / 96.5% / 89.5% / 71.5% / 59% / 29.5% at temperatures 0, 0.5, 1,
