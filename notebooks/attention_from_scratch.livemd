@@ -217,7 +217,7 @@ cells =
     }
   end
 
-Vl.new(width: 620, height: 620, title: "P(next word | previous word)")
+Vl.new(width: 620, height: 620, title: "P(next word | previous word)", background: "white")
 |> Vl.data_from_values(cells)
 |> Vl.mark(:rect)
 |> Vl.encode_field(:x, "next",
@@ -232,7 +232,12 @@ Vl.new(width: 620, height: 620, title: "P(next word | previous word)")
 )
 |> Vl.encode_field(:color, "probability",
   type: :quantitative,
-  scale: [scheme: "blues"]
+  # White at zero rather than the pale tint `scheme: "blues"` starts from, so
+  # the 900-odd empty cells drop out instead of painting the whole square.
+  # Square root rather than linear because one cell is 0.9 and most are under
+  # 0.05, and a linear ramp spends its entire range on the outlier.
+  scale: [type: :sqrt, range: ["#ffffff", "#08306b"]],
+  legend: [title: "P"]
 )
 ```
 
@@ -532,12 +537,18 @@ heatmap = fn params, words ->
       end)
     end)
 
-  Vl.new(width: 480, height: 480, title: Enum.join(words, " "))
+  Vl.new(width: 480, height: 480, title: Enum.join(words, " "), background: "white")
   |> Vl.data_from_values(cells)
   |> Vl.mark(:rect)
   |> Vl.encode_field(:x, "key", type: :nominal, sort: nil, title: "attends to")
   |> Vl.encode_field(:y, "query", type: :nominal, sort: nil, title: "position")
-  |> Vl.encode_field(:color, "weight", type: :quantitative, scale: [scheme: "blues"])
+  |> Vl.encode_field(:color, "weight",
+    type: :quantitative,
+    # White at zero, so the masked upper triangle reads as genuinely absent
+    # rather than as a very small number. It is exactly 0.0.
+    scale: [domain: [0.0, 1.0], range: ["#ffffff", "#08306b"]],
+    legend: [title: "weight"]
+  )
 end
 
 heatmap.(trained, probe)
