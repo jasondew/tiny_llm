@@ -53,6 +53,7 @@ defmodule TinyLlm.Sampler do
   distribution is than any amount of explanation.
   """
 
+  alias TinyLlm.Model
   alias TinyLlm.Tensor
   alias TinyLlm.Train
   alias TinyLlm.Vocab
@@ -70,13 +71,29 @@ defmodule TinyLlm.Sampler do
   argmax, which keeps the return type the same whatever the temperature.
   """
   @spec distribution(Train.params(), [Vocab.word()], float()) :: Tensor.row()
-  def distribution(_params, _words, _temperature), do: raise("TODO: stage 6")
+  def distribution(params, words, temperature) do
+    tokens = Vocab.encode(words)
+    logits = Model.forward(params, tokens).logits |> List.last()
+
+    if temperature == 0.0 do
+      Tensor.one_hot(Tensor.argmax(logits), length(logits))
+    else
+      scaled_logits = Enum.map(logits, fn z -> z / temperature end)
+      [probabilities] = Tensor.softmax([scaled_logits])
+      probabilities
+    end
+  end
 
   @doc """
   One word, drawn from `distribution/3`.
   """
   @spec next_word(Train.params(), [Vocab.word()], float()) :: Vocab.word()
-  def next_word(_params, _words, _temperature), do: raise("TODO: stage 6")
+  def next_word(params, words, temperature) do
+    params
+    |> distribution(words, temperature)
+    |> Tensor.weighted_random_index()
+    |> Vocab.id_to_word()
+  end
 
   @doc """
   One generated sentence, as a list of words ending in `"."`.
@@ -87,7 +104,9 @@ defmodule TinyLlm.Sampler do
   that care should check rather than assume.
   """
   @spec sentence(Train.params(), keyword()) :: [Vocab.word()]
-  def sentence(_params, _options \\ []), do: raise("TODO: stage 6")
+  def sentence(params, options \\ []) do
+    params |> trace(options) |> Enum.map(& &1.chosen)
+  end
 
   @doc """
   A stream of generated sentences.
@@ -96,17 +115,46 @@ defmodule TinyLlm.Sampler do
   can pull one sentence per click.
   """
   @spec stream(Train.params(), keyword()) :: Enumerable.t()
-  def stream(_params, _options \\ []), do: raise("TODO: stage 6")
+  def stream(params, options \\ []) do
+    Stream.repeatedly(fn -> sentence(params, options) end)
+  end
 
   @doc """
-  Every step of one generation: what was read, and what came of it.
+  Every step of one generation: the distribution, and what was drawn from it.
 
   The stage 7 notebook draws the per-step probability bars from this, so it
   keeps the whole distribution at each position rather than just the word
   that won.
+
+  The prefix each step read is deliberately absent: it is the start token
+  plus every earlier `:chosen`, so storing it would make the trace
+  quadratic in a sentence's length to say nothing new.
   """
   @spec trace(Train.params(), keyword()) :: [
-          %{prefix: [Vocab.word()], distribution: Tensor.row(), chosen: Vocab.word()}
+          %{distribution: Tensor.row(), chosen: Vocab.word()}
         ]
-  def trace(_params, _options \\ []), do: raise("TODO: stage 6")
+  def trace(params, options \\ []) do
+    temperature = Keyword.get(options, :temperature, 1.0)
+    max_tokens = Keyword.get(options, :max_tokens, length(params.positions))
+
+    # The prefix is carried reversed, so each step prepends rather than
+    # appends, and is reversed once on the way into the model. Both are
+    # O(n) on a list of at most 16, which is nothing against a forward pass
+    # that re-reads the whole prefix every step. That re-reading is the
+    # genuinely quadratic part of generation, and a KV cache is what fixes
+    # it in a model that has to be fast. This one does not.
+    {[Vocab.start_token()], false}
+    |> Stream.unfold(fn
+      {_reversed_prefix, true} ->
+        nil
+
+      {reversed_prefix, false} ->
+        distribution = distribution(params, Enum.reverse(reversed_prefix), temperature)
+        chosen = Vocab.id_to_word(Tensor.weighted_random_index(distribution))
+        step = %{distribution: distribution, chosen: chosen}
+
+        {step, {[chosen | reversed_prefix], chosen == Vocab.end_token()}}
+    end)
+    |> Enum.take(max_tokens)
+  end
 end

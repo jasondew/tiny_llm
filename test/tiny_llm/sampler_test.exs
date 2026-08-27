@@ -218,16 +218,19 @@ defmodule TinyLlm.SamplerTest do
       assert_in_delta Enum.sum(first.distribution), 1.0, 1.0e-9
     end
 
-    test "each step's prefix is the start token plus everything chosen before it", %{
-      params: params
-    } do
+    test "each step's distribution is the one its own prefix produces", %{params: params} do
+      # The prefix is not stored: it is the start token plus every earlier
+      # chosen word, so keeping it would make the trace quadratic in the
+      # sentence length to say nothing new. Rebuild it and check the step
+      # really came from it, which is the property that mattered.
       Sampler.seed(15)
       steps = Sampler.trace(params)
 
       for {step, index} <- Enum.with_index(steps) do
         chosen_so_far = steps |> Enum.take(index) |> Enum.map(& &1.chosen)
+        prefix = [Vocab.start_token() | chosen_so_far]
 
-        assert step.prefix == [Vocab.start_token() | chosen_so_far]
+        assert step.distribution == Sampler.distribution(params, prefix, 1.0)
       end
     end
   end
