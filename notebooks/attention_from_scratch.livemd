@@ -50,8 +50,9 @@ The ordering is deliberate: every word class occupies a contiguous range of
 ids. That choice pays off the moment we draw a picture.
 
 ```elixir
-# Printed rather than tabulated, because a table truncates the long rows and
-# a truncated vocabulary is a lie about the model.
+# Nouns are split by number so no row is long enough for the table to
+# truncate it. The combined row ran to ten words and lost the last three
+# behind the column width.
 [
   {"determiners", Vocab.determiners()},
   {"nouns, singular", Vocab.nouns(:singular)},
@@ -63,12 +64,16 @@ ids. That choice pays off the moment we draw a picture.
   {"connectives", Vocab.connectives()},
   {"boundaries", [Vocab.start_token(), Vocab.end_token()]}
 ]
-|> Enum.map_join("\n", fn {class, words} ->
-  labelled = Enum.map_join(words, "  ", fn word -> "#{word}:#{Vocab.word_to_id(word)}" end)
+|> Enum.map(fn {class, words} ->
+  ids = Enum.map(words, &Vocab.word_to_id/1)
 
-  "#{String.pad_trailing(class, 20)}#{labelled}"
+  %{
+    "class" => class,
+    "ids" => Enum.join(ids, " "),
+    "words" => Enum.join(words, " ")
+  }
 end)
-|> Kino.Text.new()
+|> Kino.DataTable.new(name: "32 words, grouped by class")
 ```
 
 A word is only ever its id, and back again:
