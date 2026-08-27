@@ -294,7 +294,8 @@ different order gives a slightly different answer.
 That is worth seeing rather than rounding away. It is why the tests compare
 row sums with a tolerance instead of `==`, and it is the same reason the
 gradient checks in stage 3 onward will use relative error rather than exact
-equality. Hand-written numerics live with this everywhere.
+equality. Numerics written directly against floats live with this
+everywhere.
 
 ### Where the bigram wins
 
@@ -401,9 +402,9 @@ Bigram.seed(7)
 ## Training the real model
 
 One block: attention, a residual, RMSNorm, and a 32 to 128 to 32 MLP.
-Fifteen thousand parameters. Every gradient in it was derived by hand in
-`docs/backprop.md` and is checked against finite differences by the test
-suite.
+Fifteen thousand parameters. Every gradient in it is written out
+explicitly, derived analytically in `docs/backprop.md` rather than produced
+by autodiff, and checked against finite differences by the test suite.
 
 The loop below is `Train.run/1` unrolled, so the chart can be fed as it goes.
 Nothing else about it differs.
@@ -701,8 +702,9 @@ model code, and `mix.exs` has an empty dependency list.
 
 What is here is a decoder-only transformer with learned positional embeddings,
 scaled dot-product attention, a causal mask, residual connections, RMSNorm, a
-position-wise MLP, cross-entropy loss, hand-derived backpropagation checked
-against finite differences, and temperature sampling.
+position-wise MLP, cross-entropy loss, backpropagation written out
+explicitly and checked against finite differences, and temperature
+sampling.
 
 Every one of those is the same thing a frontier model does. The difference is
 thirteen orders of magnitude and a tokenizer.

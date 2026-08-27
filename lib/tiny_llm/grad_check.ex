@@ -1,6 +1,6 @@
 defmodule TinyLlm.GradCheck do
   @moduledoc """
-  The safety net for every hand-derived gradient in this project.
+  The safety net for every explicitly written gradient in this project.
 
   A plausible looking wrong gradient is the most likely way this whole
   project fails, and it is the one bug that hides completely. A model with a
