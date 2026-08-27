@@ -44,6 +44,26 @@ alias TinyLlm.Train
 alias TinyLlm.Vocab
 alias VegaLite, as: Vl
 
+# Two horizontal lines every loss chart in this notebook carries.
+#
+# ln(32) is what a uniform guess over 32 words costs, so it is where a model
+# that has learned nothing sits. 1.9021 is H(next | previous) for this grammar,
+# computed from the grammar rather than measured: the best score attainable
+# seeing only the previous word, whatever the model.
+reference_lines =
+  Vl.new()
+  |> Vl.data_from_values([
+    %{loss: :math.log(32), bound: "knowing nothing: ln(32)"},
+    %{loss: 1.9021, bound: "best possible seeing one word"}
+  ])
+  |> Vl.mark(:rule, stroke_dash: [6, 4], size: 2)
+  |> Vl.encode_field(:y, "loss", type: :quantitative)
+  |> Vl.encode_field(:color, "bound",
+    type: :nominal,
+    scale: [range: ["#9e9e9e", "#d95f02"]],
+    legend: [title: nil, orient: :bottom]
+  )
+
 :ok
 ```
 
@@ -419,19 +439,22 @@ a gradient that collapses to one line: `dlogits = p - one_hot(target)`.
 embedder =
   Train.run(%Train.Config{model: Embedder, learning_rate: 1.0, steps: 800, log_every: 100})
 
-embedder.losses
-|> Enum.map(fn {step, loss} -> %{step: step, loss: loss} end)
-|> then(fn points ->
-  Vl.new(width: 640, height: 280, title: "neural bigram, held-out loss", background: "white")
+points = Enum.map(embedder.losses, fn {step, loss} -> %{step: step, loss: loss} end)
+
+Vl.new(width: 640, height: 280, title: "neural bigram, held-out loss", background: "white")
+|> Vl.layers([
+  Vl.new()
   |> Vl.data_from_values(points)
   |> Vl.mark(:line, point: true)
   |> Vl.encode_field(:x, "step", type: :quantitative)
-  |> Vl.encode_field(:y, "loss", type: :quantitative, scale: [zero: false])
-end)
+  |> Vl.encode_field(:y, "loss", type: :quantitative, scale: [zero: false]),
+  reference_lines
+])
 ```
 
-It starts at `ln(32)`, about 3.466, which is the cost of knowing nothing and
-guessing uniformly over 32 words. It ends around 1.944.
+It starts on the grey line, `ln(32)`, which is what guessing uniformly over 32
+words costs and therefore where a model that has learned nothing sits. It ends
+just above the orange one, around 1.944.
 
 **And that is the whole point of this section.** 1.9021 is the conditional
 entropy of this grammar given one word of context: the best score any model can
@@ -469,16 +492,21 @@ head =
     log_every: 100
   })
 
-[%{model: "counting bigram", loss: 1.9021}, %{model: "neural bigram", loss: 1.9436}]
-|> Enum.concat(
-  Enum.map(head.losses, fn {step, loss} -> %{model: "attention, step #{step}", loss: loss} end)
-)
-|> Enum.map(fn row -> %{row | loss: Float.round(row.loss, 4)} end)
-|> Kino.DataTable.new(name: "held-out loss, in nats per token")
+points = Enum.map(head.losses, fn {step, loss} -> %{step: step, loss: loss} end)
+
+Vl.new(width: 640, height: 320, title: "one attention head, held-out loss", background: "white")
+|> Vl.layers([
+  Vl.new()
+  |> Vl.data_from_values(points)
+  |> Vl.mark(:line, point: true)
+  |> Vl.encode_field(:x, "step", type: :quantitative)
+  |> Vl.encode_field(:y, "loss", type: :quantitative, scale: [zero: false]),
+  reference_lines
+])
 ```
 
-Between step 200 and step 300 it crosses **1.9021**, and that number is the
-whole reason this section exists. It is not a benchmark anyone chose. It is the
+Between step 200 and step 300 the line crosses the orange one, and that orange
+line is the whole reason this section exists. It is not a benchmark anyone chose. It is the
 conditional entropy of this grammar given one word of context, computed from the
 grammar itself, and it is the floor for every model in the two sections above no
 matter how large.
@@ -539,10 +567,17 @@ config = %Train.Config{
 # Rendered before the loop rather than returned after it, so the points
 # arrive while you watch instead of all at once at the end.
 chart =
-  Vl.new(width: 640, height: 320, title: "held-out loss, in nats", background: "white")
-  |> Vl.mark(:line, point: true)
-  |> Vl.encode_field(:x, "step", type: :quantitative)
-  |> Vl.encode_field(:y, "loss", type: :quantitative, scale: [zero: false])
+  Vl.new(width: 640, height: 320, title: "the whole model, held-out loss", background: "white")
+  |> Vl.layers([
+    Vl.new()
+    # Named, because a layered chart has more than one dataset and push/3 has
+    # to be told which of them a point belongs to.
+    |> Vl.data_from_values([], name: "losses")
+    |> Vl.mark(:line, point: true)
+    |> Vl.encode_field(:x, "step", type: :quantitative)
+    |> Vl.encode_field(:y, "loss", type: :quantitative, scale: [zero: false]),
+    reference_lines
+  ])
   |> Kino.VegaLite.new()
   |> Kino.render()
 
@@ -553,7 +588,9 @@ evaluation = config.evaluation_corpus_size |> Grammar.corpus() |> Transformer.ex
 trained =
   Enum.reduce(0..config.steps, Transformer.init(config), fn step, params ->
     if rem(step, 50) == 0 do
-      Kino.VegaLite.push(chart, %{step: step, loss: Transformer.loss(params, evaluation)})
+      Kino.VegaLite.push(chart, %{step: step, loss: Transformer.loss(params, evaluation)},
+        dataset: "losses"
+      )
     end
 
     Train.step(
@@ -564,13 +601,16 @@ trained =
     )
   end)
 
-Kino.VegaLite.push(chart, %{step: config.steps, loss: Transformer.loss(trained, evaluation)})
+Kino.VegaLite.push(chart, %{step: config.steps, loss: Transformer.loss(trained, evaluation)},
+  dataset: "losses"
+)
 Transformer.loss(trained, evaluation)
 ```
 
-The horizontal line to imagine on that chart is at **1.9021**, the conditional
-entropy of this grammar given one word of context. No model that sees a single
-previous word can go below it, however large. Crossing it is the whole point.
+This time the line goes well under the orange one and stays there. Both bigrams
+in the sections above are stuck at it, and this model finishes about 0.3 nats
+below, which is only possible using information the previous word does not
+carry.
 
 ## What the embeddings learned
 
