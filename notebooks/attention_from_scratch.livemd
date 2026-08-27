@@ -1,4 +1,6 @@
-# Attention, From Scratch
+# the llama who chases the dogs
+
+**Attention from scratch, in Elixir.**
 
 ```elixir
 Mix.install(

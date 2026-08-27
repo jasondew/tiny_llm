@@ -4,7 +4,9 @@
 
 A complete decoder-only transformer language model in **pure Elixir stdlib**,
 built as the companion artifact to a 30-minute conference talk:
-**"Attention, From Scratch — a transformer in pure Elixir, no libraries."**
+**"the llama who chases the dogs"**, subtitled *"Attention from scratch, in
+Elixir."* Lowercase on purpose: the title is the probe sentence, a string of
+tokens the model reads, and every word in the vocabulary is lowercase.
 Audience: Elixir engineers curious about AI. Every module may end up on a
 slide and the repo link appears on every slide, so **the code IS the talk**.
 
