@@ -18,9 +18,9 @@ This notebook is the talk, in talk order. Kino and VegaLite appear here for
 *presentation only*; they never touch the math.
 
 **Built: stages 1 through 7.** The vocabulary, the grammar that writes our
-training data, the math library, a count-based bigram, a neural bigram, one
-attention head, a full transformer block, sampling, evaluation, and the
-pictures. The bigram is the baseline the transformer has to beat, and by the
+training data, the math library, and then three models in a row, each one
+seeing more than the last: a bigram that counts, a bigram that learns, and a
+transformer that can look back further than one word. The bigram is the baseline the transformer has to beat, and by the
 end of this notebook you will see exactly where it fails, why, and what
 replaces it.
 
@@ -399,6 +399,48 @@ Bigram.seed(7)
 |> Kino.Text.new()
 ```
 
+## A neural bigram: the same context, learned
+
+The counting bigram is a lookup table. This is the same model with the counts
+replaced by parameters, and it is where gradients enter the project.
+
+Two matrices. Look up the previous word's row in a 32 by 32 embedding table,
+multiply by a 32 by 32 projection, softmax the result. Cross-entropy loss, and
+a gradient that collapses to one line: `dlogits = p - one_hot(target)`.
+
+```elixir
+embedder =
+  Train.run(%Train.Config{model: Embedder, learning_rate: 1.0, steps: 800, log_every: 100})
+
+embedder.losses
+|> Enum.map(fn {step, loss} -> %{step: step, loss: loss} end)
+|> then(fn points ->
+  Vl.new(width: 640, height: 280, title: "neural bigram, held-out loss", background: "white")
+  |> Vl.data_from_values(points)
+  |> Vl.mark(:line, point: true)
+  |> Vl.encode_field(:x, "step", type: :quantitative)
+  |> Vl.encode_field(:y, "loss", type: :quantitative, scale: [zero: false])
+end)
+```
+
+It starts at `ln(32)`, about 3.466, which is the cost of knowing nothing and
+guessing uniformly over 32 words. It ends around 1.944.
+
+**And that is the whole point of this section.** 1.9021 is the conditional
+entropy of this grammar given one word of context: the best score any model can
+get seeing only the previous word, however many parameters it has. The counting
+bigram is already at that ceiling, because counting is the optimal way to use
+one word. Learning the same thing with gradients buys essentially nothing.
+
+So the gap between 1.944 and where we want to be is not a training problem, a
+size problem, or an optimizer problem. It is an **information** problem. The
+model cannot see `llama`, so no amount of learning will make it agree with it.
+
+What this file does have is the two ends of a transformer. An embedding lookup
+on the front and a projection to vocabulary logits on the back is exactly what
+the full model does at each end. Everything in the next section goes *between*
+them.
+
 ## Training the real model
 
 One block: attention, a residual, RMSNorm, and a 32 to 128 to 32 MLP.
@@ -585,8 +627,6 @@ chases the dogs ___` needs a singular verb agreeing with `llama`, four words
 back, while the adjacent noun `dogs` is plural.
 
 ```elixir
-embedder = Train.run(%Train.Config{model: Embedder, learning_rate: 1.0, steps: 800, log_every: 800})
-
 Grammar.seed(1234)
 training_sentences = Grammar.corpus(config.training_corpus_size)
 seen = MapSet.new(training_sentences)
