@@ -145,10 +145,14 @@ defmodule TinyLlm.EvalTest do
   end
 
   describe "the three predictors" do
-    test "a bigram predictor sees only the last word, and so cannot do better than chance" do
-      # Not a slow measurement of a trained model: a structural fact. Two
-      # probes whose last word is the same and whose answers differ cannot
-      # both be right for anything conditioned on one word.
+    test "a bigram predictor gives the same answer for any two prefixes ending alike" do
+      # This is the whole of what one word of context buys, and it is less
+      # of a handicap than it sounds: measured, the bigram scores 66.7% on
+      # held-out probes, not 50%. A third of them end in the relative
+      # clause's own verb, which already agrees with the head, so the cue
+      # is adjacent and free. On the probes where a distractor noun
+      # intervenes it scores 55.3%, and so does the Embedder, to the
+      # decimal. That is the number the contrast slide should quote.
       Grammar.seed(2)
       matrix = Grammar.corpus(2_000) |> Bigram.counts() |> Bigram.matrix()
       predict = Eval.bigram_predictor(matrix)

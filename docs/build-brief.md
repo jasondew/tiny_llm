@@ -208,6 +208,38 @@ majority of generated sentences are both unseen and grammatical. Measure
 stage 4 showed agreement arriving several hundred steps after the loss has
 already passed the bigram floor.
 
+**Measured once built.** Model trained 480 steps at batch 8 with cosine
+decay from 0.5; Embedder 800 steps; Bigram counted over the same 2,000
+sentence corpus. 420 probes drawn from a fresh corpus and filtered against
+the training set.
+
+| | bigram | embedder | model |
+| --- | --- | --- | --- |
+| agreement, all probes | 66.7% | 71.7% | **91.4%** |
+| held-out loss | | 1.9436 | **1.5842** |
+
+1,000 generated sentences: 64.0% unseen, 90.6% grammatical, **54.6% both**.
+
+**The aggregate averages three different problems, and one of them is free.
+Quote the split, not the total.**
+
+| what sits next to the blank | share | bigram | embedder | model |
+| --- | --- | --- | --- | --- |
+| the relative clause's own verb (intransitive) | 32.4% | 100.0% | 100.0% | 100.0% |
+| an adjective (copula) | 29.8% | 44.8% | 61.6% | 100.0% |
+| a distractor noun (transitive) | 37.9% | 55.3% | 55.3% | **77.4%** |
+
+A third of the probes put the relative clause's verb immediately before the
+blank, and that verb already agrees with the head, so one word of context
+is enough and all three models score 100%. That block is the whole of the
+bigram's 66.7%.
+
+The case the talk is about is the last row. There the bigram and the
+Embedder score **identically**, 55.3%, because they see the same single
+word and give the same answer; the model reaches 77.4%. The defensible
+claim is not "only the model can do agreement", it is "only the model does
+better than chance when a distractor intervenes".
+
 ## Stage 7. `TinyLlm.PCA` + Livebook
 
 Everything the Livebook plots is a plain Elixir term the model already
