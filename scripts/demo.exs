@@ -13,7 +13,7 @@ alias TinyLlm.Bigram
 alias TinyLlm.Embedder
 alias TinyLlm.Eval
 alias TinyLlm.Grammar
-alias TinyLlm.Model
+alias TinyLlm.Transformer
 alias TinyLlm.Sampler
 alias TinyLlm.Train
 
@@ -36,7 +36,7 @@ end
 # Batch 8 with a cosine-decayed rate, both chosen by measurement. See the
 # stage 5 section of docs/build-brief.md for the sweep.
 model_config = %Train.Config{
-  model: Model,
+  model: Transformer,
   batch_size: 8,
   steps: 480,
   learning_rate: 0.5,

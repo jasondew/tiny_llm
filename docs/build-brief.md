@@ -149,10 +149,10 @@ d=8 config.
     0.79 on `<start>`, having nothing useful to look back at. A documented
     production-transformer behavior, reproduced in 13K parameters.
 
-## Stage 5. `TinyLlm.Block` + `TinyLlm.Model` (~150 lines)
+## Stage 5. `TinyLlm.Block` + `TinyLlm.Transformer` (~150 lines)
 
 MLP 32→128→32 with ReLU; residual connections around attention and MLP;
-RMSNorm (`x / rms(x) * g`, learned gain). `Model.forward/2` composes
+RMSNorm (`x / rms(x) * g`, learned gain). `Transformer.forward/2` composes
 embed+pos → block → project(tied or separate — your call, document it) →
 softmax. Config struct shared with stage 3 so both models use `Train`.
 **Accept:** full-model gradient check (tiny config); held-out loss beats the
@@ -196,19 +196,19 @@ pre-softmax; T=0 means argmax; stop at `"."` or max length.
 
 Eval — three checks that produce the talk's numbers:
   a. **Agreement accuracy**: held-out `who`-clause sentences, mask the verb,
-     argmax vs correct form — for Bigram, Embedder, and Model (the contrast
+     argmax vs correct form — for Bigram, Embedder, and Transformer (the contrast
      slide). Ensure held-out means held out: filter against training set.
   b. **Memorization**: % of 1000 generated sentences NOT in the training
      set (MapSet lookup).
   c. **Grammaticality**: structural checker (extend the stage-1 one) over
      generated sentences.
-**Accept:** Model beats Embedder and Bigram on (a) by a wide margin;
+**Accept:** Transformer beats Embedder and Bigram on (a) by a wide margin;
 majority of generated sentences are both unseen and grammatical. Measure
 (a) at the full step count, not at the point the loss curve flattens:
 stage 4 showed agreement arriving several hundred steps after the loss has
 already passed the bigram floor.
 
-**Measured once built.** Model trained 480 steps at batch 8 with cosine
+**Measured once built.** Transformer trained 480 steps at batch 8 with cosine
 decay from 0.5; Embedder 800 steps; Bigram counted over the same 2,000
 sentence corpus. 420 probes drawn from a fresh corpus and filtered against
 the training set.

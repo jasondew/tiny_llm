@@ -1,4 +1,4 @@
-defmodule TinyLlm.ModelTest do
+defmodule TinyLlm.TransformerTest do
   @moduledoc """
   Stage 5 acceptance tests for the whole model, written from the criteria in
   docs/build-brief.md and the derivation in docs/backprop.md section S.
@@ -9,7 +9,7 @@ defmodule TinyLlm.ModelTest do
 
     * the unembedding is **separate** from the embedding table, not tied.
       The brief asks for a choice and for it to be documented; see the
-      Model moduledoc for why an untied table makes the stage 7 PCA
+      Transformer moduledoc for why an untied table makes the stage 7 PCA
       picture mean one thing instead of two.
     * params are one flat map: the two tables, the block's ten, the final
       gain, and the projection. Flat because `Train.step/4` iterates it and
@@ -23,12 +23,12 @@ defmodule TinyLlm.ModelTest do
   alias TinyLlm.Attention
   alias TinyLlm.GradCheck
   alias TinyLlm.Grammar
-  alias TinyLlm.Model
+  alias TinyLlm.Transformer
   alias TinyLlm.Tensor
   alias TinyLlm.Train
 
-  @config %Train.Config{model: Model, vocabulary_size: 32, d_model: 32, context_length: 16}
-  @tiny %Train.Config{model: Model, vocabulary_size: 6, d_model: 8, context_length: 4}
+  @config %Train.Config{model: Transformer, vocabulary_size: 32, d_model: 32, context_length: 16}
+  @tiny %Train.Config{model: Transformer, vocabulary_size: 6, d_model: 8, context_length: 4}
 
   @keys [
     :bias1,
@@ -55,7 +55,7 @@ defmodule TinyLlm.ModelTest do
 
   defp tiny_params do
     Train.seed(4)
-    Model.init(@tiny)
+    Transformer.init(@tiny)
   end
 
   describe "init/1" do
@@ -78,7 +78,7 @@ defmodule TinyLlm.ModelTest do
       # Tying them would make projection == transpose(embeddings) and save
       # 1024 parameters. The brief asks for a choice; this is it, and the
       # reason is the stage 7 PCA picture.
-      params = Model.init(@config)
+      params = Transformer.init(@config)
 
       refute params.projection == Tensor.transpose(params.embeddings)
     end
@@ -87,7 +87,7 @@ defmodule TinyLlm.ModelTest do
       # 1024 embeddings + 512 positions + 4096 attention + 8192 MLP
       # + 1024 unembedding + 128 bias1 + 32 bias2 + 96 gains.
       count =
-        Model.init(@config)
+        Transformer.init(@config)
         |> Map.values()
         |> Enum.map(fn matrix -> matrix |> List.flatten() |> length() end)
         |> Enum.sum()
@@ -97,10 +97,10 @@ defmodule TinyLlm.ModelTest do
 
     test "draws the same parameters twice from the same seed" do
       Train.seed(7)
-      first = Model.init(@config)
+      first = Transformer.init(@config)
 
       Train.seed(7)
-      second = Model.init(@config)
+      second = Transformer.init(@config)
 
       assert first == second
     end
@@ -111,13 +111,13 @@ defmodule TinyLlm.ModelTest do
       Grammar.seed(3)
       corpus = Grammar.corpus(20)
 
-      assert Model.examples(corpus) == Attention.examples(corpus)
+      assert Transformer.examples(corpus) == Attention.examples(corpus)
     end
   end
 
   describe "forward/2" do
     setup do
-      {:ok, params: tiny_params(), cache: Model.forward(tiny_params(), [0, 3, 1, 3])}
+      {:ok, params: tiny_params(), cache: Transformer.forward(tiny_params(), [0, 3, 1, 3])}
     end
 
     test "produces one row of logits per position", %{cache: cache} do
@@ -140,13 +140,13 @@ defmodule TinyLlm.ModelTest do
     end
 
     test "refuses a sequence longer than the position table", %{params: params} do
-      assert_raise ArgumentError, fn -> Model.forward(params, [0, 1, 2, 3, 4]) end
+      assert_raise ArgumentError, fn -> Transformer.forward(params, [0, 1, 2, 3, 4]) end
     end
 
     test "still cannot see the future", %{params: params} do
       # The residual and the MLP are both position-wise, so wrapping the head
       # cannot have leaked anything. Cheap to assert, catastrophic to lose.
-      for {row, query_position} <- Enum.with_index(Model.weights(params, [0, 3, 1, 3])),
+      for {row, query_position} <- Enum.with_index(Transformer.weights(params, [0, 3, 1, 3])),
           {weight, key_position} <- Enum.with_index(row),
           key_position > query_position do
         assert weight === 0.0
@@ -164,10 +164,10 @@ defmodule TinyLlm.ModelTest do
       # slightly worse than uniform is normal; one that starts far better
       # would mean the evaluation set leaked.
       Train.seed(1)
-      params = Model.init(@config)
-      examples = Model.examples(Grammar.corpus(50))
+      params = Transformer.init(@config)
+      examples = Transformer.examples(Grammar.corpus(50))
 
-      assert_in_delta Model.loss(params, examples), :math.log(32), 0.5
+      assert_in_delta Transformer.loss(params, examples), :math.log(32), 0.5
     end
 
     test "averages over tokens, not over sequences" do
@@ -182,21 +182,22 @@ defmodule TinyLlm.ModelTest do
       short_count = length(short_targets)
 
       weighted =
-        (Model.loss(params, [long]) * long_count + Model.loss(params, [short]) * short_count) /
+        (Transformer.loss(params, [long]) * long_count +
+           Transformer.loss(params, [short]) * short_count) /
           (long_count + short_count)
 
-      assert_in_delta Model.loss(params, [long, short]), weighted, 1.0e-12
+      assert_in_delta Transformer.loss(params, [long, short]), weighted, 1.0e-12
     end
   end
 
   describe "gradients/2" do
     test "returns a gradient for every parameter, keyed exactly like the params" do
-      assert Map.keys(Model.gradients(tiny_params(), @batch)) |> Enum.sort() == @keys
+      assert Map.keys(Transformer.gradients(tiny_params(), @batch)) |> Enum.sort() == @keys
     end
 
     test "every gradient has the shape of the thing it is the gradient of" do
       params = tiny_params()
-      gradients = Model.gradients(params, @batch)
+      gradients = Transformer.gradients(params, @batch)
 
       for key <- @keys do
         assert Tensor.shape(Map.fetch!(gradients, key)) == Tensor.shape(Map.fetch!(params, key))
@@ -204,13 +205,13 @@ defmodule TinyLlm.ModelTest do
     end
 
     test "leaves rows of the embedding table alone when their token is absent" do
-      gradients = Model.gradients(tiny_params(), @batch)
+      gradients = Transformer.gradients(tiny_params(), @batch)
 
       assert Enum.at(gradients.embeddings, 5) == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     end
 
     test "the embedding and position tables receive the same total gradient" do
-      gradients = Model.gradients(tiny_params(), @batch)
+      gradients = Transformer.gradients(tiny_params(), @batch)
 
       embedding_totals = gradients.embeddings |> Tensor.transpose() |> Enum.map(&Enum.sum/1)
       position_totals = gradients.positions |> Tensor.transpose() |> Enum.map(&Enum.sum/1)
@@ -225,7 +226,7 @@ defmodule TinyLlm.ModelTest do
     test "every parameter matrix agrees with finite differences" do
       # The brief's stage 5 acceptance criterion: a full-model check on a
       # tiny config, covering all fourteen parameters at once.
-      errors = GradCheck.check(Model, tiny_params(), @batch)
+      errors = GradCheck.check(Transformer, tiny_params(), @batch)
 
       for {key, error} <- errors do
         assert error < 1.0e-3, "#{key} disagrees by #{error}"
@@ -237,7 +238,7 @@ defmodule TinyLlm.ModelTest do
       # far below the guard report agreement whatever the derivation says.
       # Stage 4 found this the hard way; assert the gradients are real before
       # trusting the test above.
-      gradients = Model.gradients(tiny_params(), @batch)
+      gradients = Transformer.gradients(tiny_params(), @batch)
 
       for key <- @keys do
         largest = gradients |> Map.fetch!(key) |> List.flatten() |> Enum.map(&abs/1) |> Enum.max()
@@ -253,17 +254,17 @@ defmodule TinyLlm.ModelTest do
       # A correct gradient and a model that learns are different claims: the
       # stage 4 model had the first without the second for 500 steps.
       Train.seed(9)
-      params = Model.init(@tiny)
+      params = Transformer.init(@tiny)
       batch = @batch
 
-      before = Model.loss(params, batch)
+      before = Transformer.loss(params, batch)
 
       trained =
         Enum.reduce(1..30, params, fn _step, params ->
-          Train.step(Model, params, batch, 0.5)
+          Train.step(Transformer, params, batch, 0.5)
         end)
 
-      assert Model.loss(trained, batch) < before - 0.5
+      assert Transformer.loss(trained, batch) < before - 0.5
     end
   end
 end

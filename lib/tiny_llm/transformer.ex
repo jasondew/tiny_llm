@@ -1,8 +1,8 @@
-defmodule TinyLlm.Model do
+defmodule TinyLlm.Transformer do
   @moduledoc """
   The whole thing: embeddings, one transformer block, and an unembedding.
 
-  Nothing here is new. `Model` is a lookup, a `Block`, a normalization and
+  Nothing here is new. `Transformer` is a lookup, a `Block`, a normalization and
   a matrix multiply, and every one of those already existed by the time this
   file was written.
 
@@ -36,7 +36,7 @@ defmodule TinyLlm.Model do
 
   ## Backward
 
-  Derived in `docs/backprop.md`, section S. `Model` owns only the two ends:
+  Derived in `docs/backprop.md`, section S. `Transformer` owns only the two ends:
 
       dlogits = (p - onehot(y)) / N
       dprojection = norm3ᵀ * dlogits    dnorm3 = dlogits * projectionᵀ
@@ -185,7 +185,7 @@ defmodule TinyLlm.Model do
 
   ## PRIVATE FUNCTIONS
 
-  # One example's contribution. Model owns only the two ends of the chain:
+  # One example's contribution. Transformer owns only the two ends of the chain:
   # the loss and the unembedding on one side, the tables on the other.
   # Everything between is Block, and everything inside that is Attention.
   defp example_gradients(params, input_ids, target_ids) do

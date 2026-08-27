@@ -36,7 +36,7 @@ alias TinyLlm.Bigram
 alias TinyLlm.Embedder
 alias TinyLlm.Eval
 alias TinyLlm.Grammar
-alias TinyLlm.Model
+alias TinyLlm.Transformer
 alias TinyLlm.PCA
 alias TinyLlm.Sampler
 alias TinyLlm.Tensor
@@ -492,11 +492,11 @@ milestone, and they are hundreds of steps apart.** Measured on this exact
 configuration:
 
 | steps | held-out loss | agreement, distractor probes |
-| --- | --- | --- |
-| 120 | 2.4753 | 53.5% |
-| 180 | 2.0434 | 57.9% |
-| 300 | 1.7883 | 67.3% |
-| 480 | 1.6786 | 71.1% |
+| ----- | ------------- | ---------------------------- |
+| 120   | 2.4753        | 53.5%                        |
+| 180   | 2.0434        | 57.9%                        |
+| 300   | 1.7883        | 67.3%                        |
+| 480   | 1.6786        | 71.1%                        |
 
 At step 180 the loss has just crossed the floor and the model is still at
 57.9%, which is barely above the coin flip a bigram manages. It buys those
@@ -519,7 +519,7 @@ Nothing else about it differs.
 
 ```elixir
 config = %Train.Config{
-  model: Model,
+  model: Transformer,
   batch_size: 8,
   steps: 480,
   learning_rate: 0.5,
@@ -544,20 +544,20 @@ Roughly sixty seconds.
 
 ```elixir
 Train.seed(config.seed)
-training = config.training_corpus_size |> Grammar.corpus() |> Model.examples()
-evaluation = config.evaluation_corpus_size |> Grammar.corpus() |> Model.examples()
+training = config.training_corpus_size |> Grammar.corpus() |> Transformer.examples()
+evaluation = config.evaluation_corpus_size |> Grammar.corpus() |> Transformer.examples()
 
 trained =
-  Enum.reduce(0..config.steps, Model.init(config), fn step, params ->
+  Enum.reduce(0..config.steps, Transformer.init(config), fn step, params ->
     if rem(step, 40) == 0 do
-      Kino.VegaLite.push(chart, %{step: step, loss: Model.loss(params, evaluation)})
+      Kino.VegaLite.push(chart, %{step: step, loss: Transformer.loss(params, evaluation)})
     end
 
-    Train.step(Model, params, Train.batch(training, config.batch_size), Train.learning_rate(config, step))
+    Train.step(Transformer, params, Train.batch(training, config.batch_size), Train.learning_rate(config, step))
   end)
 
-Kino.VegaLite.push(chart, %{step: config.steps, loss: Model.loss(trained, evaluation)})
-Model.loss(trained, evaluation)
+Kino.VegaLite.push(chart, %{step: config.steps, loss: Transformer.loss(trained, evaluation)})
+Transformer.loss(trained, evaluation)
 ```
 
 The horizontal line to imagine on that chart is at **1.9021**, the conditional
@@ -638,7 +638,7 @@ probe = ~w(<start> the llama who chases the dogs)
 heatmap = fn params, words ->
   cells =
     params
-    |> Model.weights(Vocab.encode(words))
+    |> Transformer.weights(Vocab.encode(words))
     |> Enum.with_index()
     |> Enum.flat_map(fn {row, query} ->
       Enum.with_index(row, fn weight, key ->

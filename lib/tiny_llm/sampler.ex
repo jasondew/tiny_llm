@@ -56,7 +56,7 @@ defmodule TinyLlm.Sampler do
   distribution is than any amount of explanation.
   """
 
-  alias TinyLlm.Model
+  alias TinyLlm.Transformer
   alias TinyLlm.Tensor
   alias TinyLlm.Train
   alias TinyLlm.Vocab
@@ -76,7 +76,7 @@ defmodule TinyLlm.Sampler do
   @spec distribution(Train.params(), [Vocab.word()], float()) :: Tensor.row()
   def distribution(params, words, temperature) do
     tokens = Vocab.encode(words)
-    logits = Model.forward(params, tokens).logits |> List.last()
+    logits = Transformer.forward(params, tokens).logits |> List.last()
 
     if temperature == 0.0 do
       Tensor.one_hot(Tensor.argmax(logits), length(logits))

@@ -23,7 +23,7 @@ defmodule TinyLlm.SamplerTest do
 
   use ExUnit.Case, async: true
 
-  alias TinyLlm.Model
+  alias TinyLlm.Transformer
   alias TinyLlm.Sampler
   alias TinyLlm.Train
   alias TinyLlm.Vocab
@@ -32,7 +32,7 @@ defmodule TinyLlm.SamplerTest do
     # Small and short: these tests need a model that has learned the shape
     # of the grammar, not one that has converged.
     config = %Train.Config{
-      model: Model,
+      model: Transformer,
       batch_size: 8,
       steps: 60,
       log_every: 60,
@@ -98,7 +98,7 @@ defmodule TinyLlm.SamplerTest do
       # Dividing the logits is the implementation to prefer anyway: it
       # reuses softmax's max-subtraction guard and normalizes once.
       prefix = ["<start>", "the"]
-      logits = Model.forward(params, Vocab.encode(prefix)).logits |> List.last()
+      logits = Transformer.forward(params, Vocab.encode(prefix)).logits |> List.last()
 
       [expected] = TinyLlm.Tensor.softmax([Enum.map(logits, &(&1 / 0.7))])
 

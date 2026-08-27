@@ -28,7 +28,7 @@ defmodule TinyLlm.EvalTest do
   alias TinyLlm.Bigram
   alias TinyLlm.Eval
   alias TinyLlm.Grammar
-  alias TinyLlm.Model
+  alias TinyLlm.Transformer
   alias TinyLlm.Tensor
   alias TinyLlm.Train
   alias TinyLlm.Vocab
@@ -165,7 +165,7 @@ defmodule TinyLlm.EvalTest do
 
     test "a model predictor sees the whole prefix, so the same last word can differ" do
       Train.seed(1)
-      params = Model.init(%Train.Config{model: Model})
+      params = Transformer.init(%Train.Config{model: Transformer})
       predict = Eval.model_predictor(params)
 
       refute predict.(~w(the llama who chases the dogs)) ==
