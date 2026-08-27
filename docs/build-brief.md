@@ -251,10 +251,51 @@ covariance matrix (~20 lines, stdlib, first two components).
 
 `notebooks/attention_from_scratch.livemd` — the talk's demo vehicle, cells
 in talk order: corpus gen → bigram heatmap → train with live loss chart →
-embedding PCA scatter (expect POS clusters + parallel singular→plural
-offsets) →
+embedding PCA scatter →
 probe-sentence attention heatmap → temperature slider (Kino.Control) with
 per-step probability bars.
+
+**What the PCA scatter actually shows, measured.** This criterion used to
+predict "POS clusters + parallel singular→plural offsets". Half of that is
+right.
+
+Class centroids and radii in the 2D projection:
+
+| class | centroid | radius |
+| --- | --- | --- |
+| singular nouns | (−0.64, 0.06) | 0.18 |
+| plural nouns | (−0.52, −0.27) | 0.29 |
+| adjectives | (0.12, 0.43) | 0.25 |
+| determiners | (0.82, 0.50) | 0.25 |
+| singular verbs | (0.38, −0.06) | 0.97 |
+| plural verbs | (0.30, −0.31) | 0.82 |
+
+Nouns, adjectives and determiners cluster tightly and separate cleanly, and
+the first component is essentially a noun detector: every noun sits at
+x ≈ −0.6 and everything else at x > 0. Verbs do not cluster at all, with
+radii larger than the distance to most other centroids.
+
+The offsets claim does not survive. Pairwise cosines between distinct
+singular→plural offsets, in all 32 dimensions, against 200 random pairs:
+
+| | pairs | mean | min | max |
+| --- | --- | --- | --- | --- |
+| random baseline | 200 | 0.146 | | 0.423 |
+| nouns | 10 | **0.372** | 0.211 | 0.630 |
+| action verbs | 6 | 0.105 | −0.001 | 0.347 |
+| all ten | 45 | 0.168 | −0.290 | 0.630 |
+
+**Nouns share a plural direction, modestly; verbs do not.** Verb offsets sit
+below the random baseline. Do not measure this as cosine against the mean
+offset: every vector contributes to that mean, the bias is upward, and it
+made the verbs look like weak signal rather than none.
+
+A likely reason, and a good beat if it checks out: the embedding table is
+the *input* representation. A noun's number as an input strongly determines
+the verb that follows, so the model has reason to encode it there. A verb's
+number as an input barely matters, since an object or a period follows
+either way. Verb number is something this model must *produce* rather than
+*read*, so it would live in `projection` instead. Untested.
 
 **The temperature slider's range is 0 to 3**, measured. Grammaticality
 falls 100% / 96.5% / 89.5% / 71.5% / 59% / 29.5% at temperatures 0, 0.5, 1,
