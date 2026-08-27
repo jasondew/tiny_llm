@@ -3,12 +3,22 @@ defmodule TinyLlm.PCA do
   Principal components by power iteration, so a 32-dimensional embedding
   can be drawn on a page.
 
-  TODO(stage 7): write the concept paragraph. It should say that the
-  embedding table is the only part of this model that can be *looked at*
-  rather than reasoned about, and that the picture is worth the twenty
-  lines: nouns cluster, verbs cluster, and the singular-to-plural offset is
-  roughly the same vector for every pair. Nobody put those there. They are
-  what "predict the next word" turns out to require.
+  The embedding table is the only part of this model that can be *looked
+  at* rather than reasoned about, and that is worth twenty lines of
+  arithmetic.
+
+  Projected onto its two most variable directions, the table has structure
+  nobody put there: nouns, adjectives and determiners land in tight
+  separate groups, and the first component comes out close to a noun
+  detector. The model was only ever asked to predict the next word. Parts
+  of speech are what that turned out to require.
+
+  What is *not* in the picture is as interesting. Verbs do not cluster, and
+  their singular-to-plural offsets point in no shared direction at all,
+  while nouns' do. Verb number lives in the unembedding instead, because
+  nothing following a verb depends on its number: this model has to write
+  verb number without ever needing to read it. See the stage 7 section of
+  `docs/build-brief.md` for the measurements.
 
   ## Power iteration
 

@@ -3,11 +3,14 @@ defmodule TinyLlm.Sampler do
   Generation: running the model forward over and over, feeding it what it
   just said.
 
-  TODO(stage 6): write the concept paragraph. It should say that nothing
-  about the model is generative. It answers one question, "what comes
-  next", and generation is just asking it repeatedly and believing the
-  answer. Every impressive thing a language model appears to do is this
-  loop around that one question.
+  Nothing about the model is generative. It answers exactly one question,
+  what comes next, and it answers it with a probability for each of 32
+  words. Generation is asking that question over and over and believing the
+  answer.
+
+  Every impressive thing a language model appears to do is this loop around
+  that one question. There is no plan, no state carried between steps, and
+  nothing that knows a sentence is being written.
 
   ## The loop
 

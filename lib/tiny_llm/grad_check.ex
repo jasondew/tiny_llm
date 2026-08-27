@@ -2,11 +2,17 @@ defmodule TinyLlm.GradCheck do
   @moduledoc """
   The safety net for every hand-derived gradient in this project.
 
-  TODO(stage 3): write the concept paragraph. It should say that a plausible
-  looking wrong gradient is the most likely way this whole project fails,
-  because a model with a subtly wrong backward pass still trains, still
-  produces a falling loss curve, and still generates sentences. Nothing
-  looks broken. Finite differences are how you find out anyway.
+  A plausible looking wrong gradient is the most likely way this whole
+  project fails, and it is the one bug that hides completely. A model with a
+  subtly wrong backward pass still trains. The loss still falls, the
+  sentences still come out, nothing raises, and the only symptom is that it
+  ends up somewhat worse than it should have, which is invisible without
+  something correct to compare against.
+
+  Finite differences are how you find out anyway. Nudge one parameter by a
+  tiny amount in each direction, watch what the loss does, and compare that
+  to what the derivation claimed. It is far too slow to train with and
+  exactly right for checking.
 
   ## How it works
 

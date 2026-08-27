@@ -2,10 +2,12 @@ defmodule TinyLlm.Eval do
   @moduledoc """
   The three measurements the talk is built on.
 
-  TODO(stage 6): write the concept paragraph. It should say that a loss
-  curve going down is not evidence of anything in particular, and that the
-  question the audience actually has is "did it learn language or did it
-  memorize the corpus". These three checks answer it.
+  A loss curve going down is not evidence of anything in particular. It is
+  compatible with learning the language, with memorizing the corpus, and
+  with exploiting a cue that happens to correlate with the answer.
+
+  The question anyone watching actually has is which of those happened, and
+  the three checks below are what answer it. None of them is a loss.
 
   ## a. Agreement
 

@@ -3,11 +3,15 @@ defmodule TinyLlm.Block do
   One transformer block: the stage 4 head, wrapped in the three things that
   make it trainable at depth.
 
-  TODO(stage 5): write the concept paragraph. It should say that the head
-  on its own is one linear map dressed up, and that what turns it into a layer
-  you can stack is normalization before, a residual around, and a
-  position-wise MLP after. The residual is the load-bearing one: it leaves a
-  path from the loss to the embeddings that passes through no matrix at all.
+  The head on its own is one linear map dressed up. What turns it into a
+  layer you can stack is the three things around it: a normalization before,
+  a residual around, and a position-wise MLP after.
+
+  The residual is the load-bearing one. It leaves a path from the loss all
+  the way back to the embeddings that passes through no matrix at all, so
+  whatever the sublayers do to their share of the gradient, the identity
+  path delivers the rest undiminished. That is what makes depth possible,
+  and it is four characters of arithmetic.
 
   ## Forward
 

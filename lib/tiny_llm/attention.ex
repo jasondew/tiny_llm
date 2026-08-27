@@ -3,14 +3,18 @@ defmodule TinyLlm.Attention do
   A single causal self-attention head, and the first model here that can
   read more than one word.
 
-  TODO(stage 4): write the concept paragraph. It should say that the bigram
-  and the Embedder both answer "what usually follows this word", and that
-  every question worth asking about language needs more: `the llama who
-  chases the dogs ___` needs the verb to agree with `llama`, four words
-  back, and not with `dogs`, which is adjacent. Attention is the mechanism
-  for reaching back. Every position emits a query, every position emits a
-  key, and the softmax over their dot products decides how much each
-  position gets to draw on each earlier one.
+  The bigram and the Embedder both answer the same question: what usually
+  follows this word. Every question worth asking about language needs more
+  than that. `the llama who chases the dogs ___` wants a verb agreeing with
+  `llama`, four words back, and not with `dogs`, which is adjacent and the
+  wrong number.
+
+  Attention is the mechanism for reaching back. Every position emits a
+  query saying what it is looking for, every position emits a key saying
+  what it offers, and the softmax over their dot products decides how much
+  each position draws on each earlier one. Nothing about that is specific
+  to grammar. It is a differentiable lookup, and grammar is one of the
+  things it turns out to be good for.
 
   ## Forward
 

@@ -2,13 +2,15 @@ defmodule TinyLlm.Model do
   @moduledoc """
   The whole thing: embeddings, one transformer block, and an unembedding.
 
-  TODO(stage 5): write the concept paragraph. It should say that nothing
-  here is new. `Model` is a lookup, a `Block`, a normalization and a matrix
-  multiply, and every one of those already existed. What makes it a language
-  model rather than a pile of layers is that the block leaves its input
-  shape unchanged, so the same block could run twice, or twelve times, and
-  the only reason it runs once here is that a 32 word grammar does not need
-  more.
+  Nothing here is new. `Model` is a lookup, a `Block`, a normalization and
+  a matrix multiply, and every one of those already existed by the time this
+  file was written.
+
+  What makes it a language model rather than a pile of layers is that the
+  block leaves its input shape unchanged. The same block could run twice, or
+  twelve times, and the only reason it runs once here is that a 32 word
+  grammar does not need more. Scale is the difference between this file and
+  a frontier model. Structure is not.
 
   ## Forward
 
