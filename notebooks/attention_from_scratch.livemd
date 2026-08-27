@@ -1,10 +1,16 @@
 # Attention, From Scratch
 
 ```elixir
-Mix.install([
-  {:kino_vega_lite, "~> 0.1"},
-  {:tiny_llm, path: Path.join(__DIR__, "..")}
-])
+Mix.install(
+  [
+    {:kino_livereload, "~> 0.1"},
+    {:kino_vega_lite, "~> 0.1"},
+    {:tiny_llm, path: Path.join(__DIR__, "..")}
+  ],
+  # The path dependency is compiled once per runtime and cached, so without
+  # this a change under lib/ is invisible until the runtime is restarted.
+  force: true
+)
 ```
 
 ## What this is
@@ -18,13 +24,14 @@ This notebook is the talk, in talk order. Kino and VegaLite appear here for
 *presentation only*; they never touch the math.
 
 **Built: stages 1 through 7.** The vocabulary, the grammar that writes our
-training data, the math library, and then three models in a row, each one
-seeing more than the last: a bigram that counts, a bigram that learns, and a
-transformer that can look back further than one word. The bigram is the baseline the transformer has to beat, and by the
+training data, the math library, and then four models in a row: a bigram that
+counts, a bigram that learns, a single attention head that can finally look
+back further than one word, and the full block that wraps it. The bigram is the baseline the transformer has to beat, and by the
 end of this notebook you will see exactly where it fails, why, and what
 replaces it.
 
 ```elixir
+alias TinyLlm.Attention
 alias TinyLlm.Bigram
 alias TinyLlm.Embedder
 alias TinyLlm.Eval
@@ -441,9 +448,68 @@ on the front and a projection to vocabulary logits on the back is exactly what
 the full model does at each end. Everything in the next section goes *between*
 them.
 
-## Training the real model
+## One attention head, and nothing else
 
-One block: attention, a residual, RMSNorm, and a 32 to 128 to 32 MLP.
+The neural bigram could not see `llama`. This one can.
+
+`TinyLlm.Attention` is a single causal self-attention head with a projection on
+the end and nothing else: no residual, no normalization, no MLP. Every position
+emits a query saying what it is looking for and a key saying what it offers, and
+the softmax over their dot products decides how much each position draws on each
+earlier one.
+
+```elixir
+head =
+  Train.run(%Train.Config{
+    model: Attention,
+    batch_size: 8,
+    steps: 480,
+    learning_rate: 0.5,
+    learning_rate_schedule: :cosine,
+    log_every: 60
+  })
+
+[%{model: "counting bigram", loss: 1.9021}, %{model: "neural bigram", loss: 1.9436}]
+|> Enum.concat(
+  Enum.map(head.losses, fn {step, loss} -> %{model: "attention, step #{step}", loss: loss} end)
+)
+|> Enum.map(fn row -> %{row | loss: Float.round(row.loss, 4)} end)
+|> Kino.DataTable.new(name: "held-out loss, in nats per token")
+```
+
+Between step 120 and step 180 it crosses **1.9021**, and that number is the
+whole reason this section exists. It is not a benchmark anyone chose. It is the
+conditional entropy of this grammar given one word of context, computed from the
+grammar itself, and it is the floor for every model in the two sections above no
+matter how large.
+
+Going below it is proof, not evidence. The only way to score there is to use
+information that is not in the previous word.
+
+One caution worth carrying into the next section, because it cost a day to
+learn. **Crossing that floor and handling a distractor are not the same
+milestone, and they are hundreds of steps apart.** Measured on this exact
+configuration:
+
+| steps | held-out loss | agreement, distractor probes |
+| --- | --- | --- |
+| 120 | 2.4753 | 53.5% |
+| 180 | 2.0434 | 57.9% |
+| 300 | 1.7883 | 67.3% |
+| 480 | 1.6786 | 71.1% |
+
+At step 180 the loss has just crossed the floor and the model is still at
+57.9%, which is barely above the coin flip a bigram manages. It buys those
+first nats from adjectives and clause structure, and learns agreement last.
+
+So a loss number is never evidence about agreement. That is what the eval
+section is for.
+
+## Adding the rest of the block
+
+The head above is one linear map dressed up. What turns it into a layer you
+could stack twelve of is the three things around it: a residual, RMSNorm, and a
+32 to 128 to 32 MLP.
 Fifteen thousand parameters. Every gradient in it is written out
 explicitly, derived analytically in `docs/backprop.md` rather than produced
 by autodiff, and checked against finite differences by the test suite.
