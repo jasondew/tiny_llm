@@ -477,7 +477,7 @@ head =
 |> Kino.DataTable.new(name: "held-out loss, in nats per token")
 ```
 
-Between step 120 and step 180 it crosses **1.9021**, and that number is the
+Between step 200 and step 300 it crosses **1.9021**, and that number is the
 whole reason this section exists. It is not a benchmark anyone chose. It is the
 conditional entropy of this grammar given one word of context, computed from the
 grammar itself, and it is the floor for every model in the two sections above no
@@ -493,14 +493,17 @@ configuration:
 
 | steps | held-out loss | agreement, distractor probes |
 | ----- | ------------- | ---------------------------- |
-| 120   | 2.4753        | 53.5%                        |
-| 180   | 2.0434        | 57.9%                        |
+| 100   | 2.5909        | 52.8%                        |
+| 200   | 1.9627        | 57.9%                        |
 | 300   | 1.7883        | 67.3%                        |
-| 480   | 1.6786        | 71.1%                        |
+| 400   | 1.7116        | 70.4%                        |
+| 500   | 1.6714        | 71.7%                        |
 
-At step 180 the loss has just crossed the floor and the model is still at
-57.9%, which is barely above the coin flip a bigram manages. It buys those
-first nats from adjectives and clause structure, and learns agreement last.
+At step 200 the loss is all but at the floor and the model is still at 57.9%,
+barely above the coin flip a bigram manages. Agreement keeps climbing for
+another three hundred steps after the loss curve has visibly flattened. It buys
+those first nats from adjectives and clause structure, and learns agreement
+last.
 
 So a loss number is never evidence about agreement. That is what the eval
 section is for.
@@ -514,46 +517,51 @@ Fifteen thousand parameters. Every gradient in it is written out
 explicitly, derived analytically in `docs/backprop.md` rather than produced
 by autodiff, and checked against finite differences by the test suite.
 
-The loop below is `Train.run/1` unrolled, so the chart can be fed as it goes.
-Nothing else about it differs.
-
-```elixir
-config = %Train.Config{
-  model: Transformer,
-  batch_size: 8,
-  steps: 480,
-  learning_rate: 0.5,
-  learning_rate_schedule: :cosine,
-  seed: 1234
-}
-
-chart =
-  Vl.new(width: 640, height: 320, title: "held-out loss, in nats")
-  |> Vl.mark(:line, point: true)
-  |> Vl.encode_field(:x, "step", type: :quantitative)
-  |> Vl.encode_field(:y, "loss", type: :quantitative, scale: [zero: false])
-  |> Kino.VegaLite.new()
-```
-
 Batch size 8 with the learning rate decayed on a cosine, both chosen by
 measurement rather than taste: see the stage 5 section of `docs/build-brief.md`
 for the sweep, and for the finding that one run of this model is worth about
 ±0.05 nats, so no two configurations may be compared on a single seed.
 
-Roughly sixty seconds.
+The loop below is `Train.run/1` unrolled, so the chart can be fed as it goes.
+Nothing else about it differs. It renders the chart first and then fills it in,
+so expect an empty pair of axes for a few seconds. Roughly a minute in total.
 
 ```elixir
+config = %Train.Config{
+  model: Transformer,
+  batch_size: 8,
+  steps: 500,
+  learning_rate: 0.5,
+  learning_rate_schedule: :cosine,
+  seed: 1234
+}
+
+# Rendered before the loop rather than returned after it, so the points
+# arrive while you watch instead of all at once at the end.
+chart =
+  Vl.new(width: 640, height: 320, title: "held-out loss, in nats", background: "white")
+  |> Vl.mark(:line, point: true)
+  |> Vl.encode_field(:x, "step", type: :quantitative)
+  |> Vl.encode_field(:y, "loss", type: :quantitative, scale: [zero: false])
+  |> Kino.VegaLite.new()
+  |> Kino.render()
+
 Train.seed(config.seed)
 training = config.training_corpus_size |> Grammar.corpus() |> Transformer.examples()
 evaluation = config.evaluation_corpus_size |> Grammar.corpus() |> Transformer.examples()
 
 trained =
   Enum.reduce(0..config.steps, Transformer.init(config), fn step, params ->
-    if rem(step, 40) == 0 do
+    if rem(step, 50) == 0 do
       Kino.VegaLite.push(chart, %{step: step, loss: Transformer.loss(params, evaluation)})
     end
 
-    Train.step(Transformer, params, Train.batch(training, config.batch_size), Train.learning_rate(config, step))
+    Train.step(
+      Transformer,
+      params,
+      Train.batch(training, config.batch_size),
+      Train.learning_rate(config, step)
+    )
   end)
 
 Kino.VegaLite.push(chart, %{step: config.steps, loss: Transformer.loss(trained, evaluation)})
