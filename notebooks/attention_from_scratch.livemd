@@ -463,10 +463,10 @@ head =
   Train.run(%Train.Config{
     model: Attention,
     batch_size: 8,
-    steps: 480,
+    steps: 500,
     learning_rate: 0.5,
     learning_rate_schedule: :cosine,
-    log_every: 60
+    log_every: 100
   })
 
 [%{model: "counting bigram", loss: 1.9021}, %{model: "neural bigram", loss: 1.9436}]
