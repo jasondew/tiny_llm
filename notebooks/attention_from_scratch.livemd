@@ -1,13 +1,8 @@
 # the llama who chases the dogs
 
-## Section
-
-**Attention from scratch, in Elixir.**
-
 ```elixir
 Mix.install(
   [
-    {:kino_livereload, "~> 0.1"},
     {:kino_vega_lite, "~> 0.1"},
     {:tiny_llm, path: Path.join(__DIR__, "..")}
   ],
@@ -17,12 +12,12 @@ Mix.install(
 )
 ```
 
-## What this is
+## Attention from scratch, in Elixir
 
 A complete decoder-only transformer language model in pure Elixir standard
-library. No Nx, no Axon, no hex packages in the model code. Hand-derived
-backpropagation. About thirteen thousand parameters, trained on a laptop CPU
-in under a minute.
+library. No Nx, no Axon, no hex packages in the model code. Every gradient
+written out explicitly rather than produced by autodiff. Fifteen thousand
+parameters, trained on a laptop CPU in under a minute.
 
 This notebook is the talk, in talk order. Kino and VegaLite appear here for
 *presentation only*; they never touch the math.
