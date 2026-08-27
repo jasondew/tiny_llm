@@ -17,15 +17,23 @@ in under a minute.
 This notebook is the talk, in talk order. Kino and VegaLite appear here for
 *presentation only*; they never touch the math.
 
-**Built so far: stages 1 and 2.** The vocabulary, the grammar that writes our
-training data, the math library, and a count-based bigram. The bigram is the
-baseline the transformer has to beat, and by the end of this notebook you will
-be able to see exactly where it fails and why.
+**Built: stages 1 through 7.** The vocabulary, the grammar that writes our
+training data, the math library, a count-based bigram, a neural bigram, one
+attention head, a full transformer block, sampling, evaluation, and the
+pictures. The bigram is the baseline the transformer has to beat, and by the
+end of this notebook you will see exactly where it fails, why, and what
+replaces it.
 
 ```elixir
 alias TinyLlm.Bigram
+alias TinyLlm.Embedder
+alias TinyLlm.Eval
 alias TinyLlm.Grammar
+alias TinyLlm.Model
+alias TinyLlm.PCA
+alias TinyLlm.Sampler
 alias TinyLlm.Tensor
+alias TinyLlm.Train
 alias TinyLlm.Vocab
 alias VegaLite, as: Vl
 
@@ -381,23 +389,305 @@ Bigram.seed(7)
 |> Kino.Text.new()
 ```
 
-## Still to come
+## Training the real model
 
-The remaining stages, each of which slots in below this line:
+One block: attention, a residual, RMSNorm, and a 32 to 128 to 32 MLP.
+Fifteen thousand parameters. Every gradient in it was derived by hand in
+`docs/backprop.md` and is checked against finite differences by the test
+suite.
 
-* **Stage 3, the neural bigram.** Same one-word context, but the counts become
-  learned parameters: an embedding, a projection, a softmax, and cross-entropy
-  loss with a hand-derived gradient. Loss starts at `ln(32) ~ 3.466` and should
-  fall below 2.
-* **Stage 4, attention.** One causal self-attention head over the whole
-  16-token context. Learned positional embeddings, scaled dot-product scores, a
-  causal mask, and a backward pass derived by hand in `docs/backprop.md`.
-* **Stage 5, the block.** Residual connections, RMSNorm, and a 32 to 128 to 32
-  MLP, composed into a model.
-* **Stage 6, sampling and evaluation.** A temperature knob, and the numbers
-  that settle the argument: agreement accuracy for the bigram, the neural
-  bigram, and the full model, measured on held-out `who`-clause sentences.
-* **Stage 7, the pictures.** Embedding PCA, expecting part-of-speech clusters
-  and parallel singular-to-plural offsets, plus the attention heatmap for
-  `the llama who chases the dogs`, where the verb position should attend to
-  `llama` and not to `dogs`.
+The loop below is `Train.run/1` unrolled, so the chart can be fed as it goes.
+Nothing else about it differs.
+
+```elixir
+config = %Train.Config{
+  model: Model,
+  batch_size: 8,
+  steps: 480,
+  learning_rate: 0.5,
+  learning_rate_schedule: :cosine,
+  seed: 1234
+}
+
+chart =
+  Vl.new(width: 640, height: 320, title: "held-out loss, in nats")
+  |> Vl.mark(:line, point: true)
+  |> Vl.encode_field(:x, "step", type: :quantitative)
+  |> Vl.encode_field(:y, "loss", type: :quantitative, scale: [zero: false])
+  |> Kino.VegaLite.new()
+```
+
+Batch size 8 with the learning rate decayed on a cosine, both chosen by
+measurement rather than taste: see the stage 5 section of `docs/build-brief.md`
+for the sweep, and for the finding that one run of this model is worth about
+±0.05 nats, so no two configurations may be compared on a single seed.
+
+Roughly sixty seconds.
+
+```elixir
+Train.seed(config.seed)
+training = config.training_corpus_size |> Grammar.corpus() |> Model.examples()
+evaluation = config.evaluation_corpus_size |> Grammar.corpus() |> Model.examples()
+
+trained =
+  Enum.reduce(0..config.steps, Model.init(config), fn step, params ->
+    if rem(step, 40) == 0 do
+      Kino.VegaLite.push(chart, %{step: step, loss: Model.loss(params, evaluation)})
+    end
+
+    Train.step(Model, params, Train.batch(training, config.batch_size), Train.learning_rate(config, step))
+  end)
+
+Kino.VegaLite.push(chart, %{step: config.steps, loss: Model.loss(trained, evaluation)})
+Model.loss(trained, evaluation)
+```
+
+The horizontal line to imagine on that chart is at **1.9021**, the conditional
+entropy of this grammar given one word of context. No model that sees a single
+previous word can go below it, however large. Crossing it is the whole point.
+
+## What the embeddings learned
+
+Thirty-two dimensions cannot be drawn, so we take the two directions the words
+vary most along. `TinyLlm.PCA` finds them by power iteration: multiply by the
+covariance matrix, normalize, repeat. Twenty lines, no library, and the same
+algorithm that ranked the early web.
+
+```elixir
+PCA.seed(1)
+
+classify = fn word ->
+  cond do
+    word in Vocab.nouns(:singular) -> "singular noun"
+    word in Vocab.nouns(:plural) -> "plural noun"
+    word in Vocab.adjectives() -> "adjective"
+    word in Vocab.determiners() -> "determiner"
+    word in ~w(sees chases ignores flees is) -> "singular verb"
+    word in ~w(see chase ignore flee are) -> "plural verb"
+    true -> "other"
+  end
+end
+
+scatter =
+  trained.embeddings
+  |> PCA.project()
+  |> Enum.zip(Vocab.words())
+  |> Enum.map(fn {{x, y}, word} -> %{x: x, y: y, word: word, class: classify.(word)} end)
+
+Vl.new(width: 640, height: 480, title: "the embedding table, projected")
+|> Vl.data_from_values(scatter)
+|> Vl.layers([
+  Vl.new()
+  |> Vl.mark(:circle, size: 120, opacity: 0.85)
+  |> Vl.encode_field(:x, "x", type: :quantitative)
+  |> Vl.encode_field(:y, "y", type: :quantitative)
+  |> Vl.encode_field(:color, "class", type: :nominal),
+  Vl.new()
+  |> Vl.mark(:text, dy: -12, fontSize: 11)
+  |> Vl.encode_field(:x, "x", type: :quantitative)
+  |> Vl.encode_field(:y, "y", type: :quantitative)
+  |> Vl.encode_field(:text, "word", type: :nominal)
+])
+```
+
+Nobody labelled these words. The only thing the model was ever asked to do was
+predict the next one, and parts of speech fell out of it: nouns, adjectives and
+determiners land in tight, separate groups, and the first component is close to
+a noun detector, every noun on one side and everything else on the other.
+
+Verbs do **not** cluster, and that is not a failure of the picture. Measured,
+their singular-to-plural offsets in the embedding table point in no shared
+direction at all, averaging a pairwise cosine of 0.105 against a random
+baseline of 0.146. In the *projection* matrix the same offsets average 0.487.
+
+Verb number lives only in how a verb is written, never in how it is read, and
+the grammar is why: nothing that follows a verb depends on its number, so there
+is no reason to encode it on the way in. Nouns carry theirs in both tables,
+because a noun's number governs the verb that comes next.
+
+That is also the reason the embedding table and the unembedding are separate
+parameters here rather than tied. They are not storing the same thing.
+
+## Where a position looks
+
+The attention matrix for the sentence the whole talk is about. Row `t` is a
+distribution over the positions `t` is allowed to see; everything above the
+diagonal is exactly zero, because `exp(-1.0e9)` underflows to a true zero.
+
+```elixir
+probe = ~w(<start> the llama who chases the dogs)
+
+heatmap = fn params, words ->
+  cells =
+    params
+    |> Model.weights(Vocab.encode(words))
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {row, query} ->
+      Enum.with_index(row, fn weight, key ->
+        %{query: "#{query} #{Enum.at(words, query)}", key: "#{key} #{Enum.at(words, key)}", weight: weight}
+      end)
+    end)
+
+  Vl.new(width: 480, height: 480, title: Enum.join(words, " "))
+  |> Vl.data_from_values(cells)
+  |> Vl.mark(:rect)
+  |> Vl.encode_field(:x, "key", type: :nominal, sort: nil, title: "attends to")
+  |> Vl.encode_field(:y, "query", type: :nominal, sort: nil, title: "position")
+  |> Vl.encode_field(:color, "weight", type: :quantitative, scale: [scheme: "blues"])
+end
+
+heatmap.(trained, probe)
+```
+
+Two things in that picture are worth stopping on, and neither is the thing you
+would expect.
+
+**The first verb attends almost entirely to `<start>`.** That position has
+nothing useful to look back at, so it dumps its attention on the one token that
+carries no information. This is an *attention sink*, a documented behaviour of
+production transformers, appearing unprompted in fifteen thousand parameters.
+
+**The `who` row has gathered the subject.** It spends most of its attention on
+`llama`, so its output is a summary of the head noun. And the position that
+predicts the main verb spends most of *its* attention on `who`, which sounds
+like the model solving agreement in two hops.
+
+It is not, and this is the honest part. With one block, both hops happen at the
+same time. The value vector at `who` is built from `who`'s own input,
+`embedding("who") + P[3]`, which is identical whichever noun heads the sentence.
+Over half the verb position's attention goes somewhere that cannot tell singular
+from plural.
+
+The model has built half of a route it cannot use. A second block would read the
+first block's output at `who` and get the subject for free. **That is what depth
+buys**, and the model drew the argument for it unprompted.
+
+## The numbers that settle it
+
+Held-out `who`-clause sentences with the main verb removed. `the llama who
+chases the dogs ___` needs a singular verb agreeing with `llama`, four words
+back, while the adjacent noun `dogs` is plural.
+
+```elixir
+embedder = Train.run(%Train.Config{model: Embedder, learning_rate: 1.0, steps: 800, log_every: 800})
+
+Grammar.seed(1234)
+training_sentences = Grammar.corpus(config.training_corpus_size)
+seen = MapSet.new(training_sentences)
+counted = training_sentences |> Bigram.counts() |> Bigram.matrix()
+
+Grammar.seed(77)
+probes = Grammar.corpus(3_000) |> Enum.reject(&MapSet.member?(seen, &1)) |> Eval.probes()
+
+scores = [
+  {"bigram, counted", Eval.bigram_predictor(counted)},
+  {"embedder, learned", Eval.embedder_predictor(embedder.params)},
+  {"model, one block", Eval.model_predictor(trained)}
+]
+
+Kino.DataTable.new(
+  Enum.map(scores, fn {label, predict} ->
+    %{model: label, "agreement accuracy" => "#{Float.round(Eval.agreement(predict, probes) * 100, 1)}%"}
+  end)
+)
+```
+
+Read that table carefully, because the aggregate flatters the model and a
+sceptic in the room will find the reason before you do.
+
+A third of those probes put the relative clause's own verb immediately before
+the blank, as in `the llama who flees ___`, and that verb already agrees with
+the head. One word of context is enough, and all three models score 100% on
+that block. It is the whole of the bigram's score.
+
+The row that matters is the one where a distractor noun intervenes. There the
+bigram scores 55.3% and the neural bigram scores 55.3%, to the decimal: they see
+the same single word and give the same answer. The model reaches 77.4%.
+
+The claim to make is not "only the model can do agreement". It is **"only the
+model does better than chance when a distractor gets in the way"**.
+
+## Generating, and the knob
+
+Temperature divides the logits before the softmax. Below 1 the gaps widen and
+the model commits; above 1 they narrow and it wanders. At 0 it is `argmax`.
+
+```elixir
+temperature = Kino.Input.range("temperature", min: 0.0, max: 3.0, step: 0.1, default: 1.0)
+```
+
+```elixir
+Kino.listen(temperature, fn %{value: value} ->
+  Sampler.seed(1234)
+
+  sentences =
+    trained
+    |> Sampler.stream(temperature: value)
+    |> Enum.take(200)
+
+  sample = sentences |> Enum.take(8) |> Enum.map_join("\n", &Enum.join(&1, " "))
+
+  IO.puts("""
+  temperature #{value}
+    grammatical  #{Float.round(Eval.grammaticality(sentences) * 100, 1)}%
+    distinct     #{Float.round(length(Enum.uniq(sentences)) / length(sentences) * 100, 1)}%
+    unseen       #{Float.round(Eval.novelty(sentences, training_sentences) * 100, 1)}%
+
+  #{sample}
+  """)
+end)
+```
+
+Move the slider and watch the two numbers trade against each other. At 0.0 the
+model is 100% grammatical and 0.5% distinct: it says one sentence, forever, and
+that sentence is not in the training corpus. At 1.0 it is 89.5% grammatical and
+90.5% distinct. Past 2.0 it comes apart, and it comes apart in layers, with the
+outermost structure going first: `a llama is dog` keeps the syntax and loses the
+sense, `sleepy fast goose dogs flee` has lost the determiners.
+
+## One step, in full
+
+Every distribution the model passed through while writing one sentence. This is
+the entire mechanism: ask "what comes next", believe the answer, append it, ask
+again.
+
+```elixir
+Sampler.seed(20)
+
+steps =
+  trained
+  |> Sampler.trace()
+  |> Enum.with_index()
+  |> Enum.flat_map(fn {step, index} ->
+    step.distribution
+    |> Enum.zip(Vocab.words())
+    |> Enum.reject(fn {probability, _word} -> probability < 0.01 end)
+    |> Enum.map(fn {probability, word} ->
+      %{step: "#{index} -> #{step.chosen}", word: word, probability: probability}
+    end)
+  end)
+
+Vl.new(width: 640, height: 60 * length(Enum.uniq_by(steps, & &1.step)), title: "per-step distributions")
+|> Vl.data_from_values(steps)
+|> Vl.mark(:bar)
+|> Vl.encode_field(:x, "probability", type: :quantitative)
+|> Vl.encode_field(:y, "word", type: :nominal, sort: "-x")
+|> Vl.encode_field(:row, "step", type: :nominal, sort: nil)
+```
+
+There is no state carried between those rows and no plan. Each one re-reads the
+whole prefix from scratch, which is wasteful and is also why the model can never
+contradict something it has already said without seeing it again.
+
+## What is not here
+
+No autodiff. No tensors. No tokenizer. No GPU. No hex package in any of the
+model code, and `mix.exs` has an empty dependency list.
+
+What is here is a decoder-only transformer with learned positional embeddings,
+scaled dot-product attention, a causal mask, residual connections, RMSNorm, a
+position-wise MLP, cross-entropy loss, hand-derived backpropagation checked
+against finite differences, and temperature sampling.
+
+Every one of those is the same thing a frontier model does. The difference is
+thirteen orders of magnitude and a tokenizer.
