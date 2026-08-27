@@ -137,23 +137,19 @@ defmodule TinyLlm.Sampler do
     temperature = Keyword.get(options, :temperature, 1.0)
     max_tokens = Keyword.get(options, :max_tokens, length(params.positions))
 
-    # The prefix is carried reversed, so each step prepends rather than
-    # appends, and is reversed once on the way into the model. Both are
-    # O(n) on a list of at most 16, which is nothing against a forward pass
-    # that re-reads the whole prefix every step. That re-reading is the
-    # genuinely quadratic part of generation, and a KV cache is what fixes
-    # it in a model that has to be fast. This one does not.
     {[Vocab.start_token()], false}
     |> Stream.unfold(fn
       {_reversed_prefix, true} ->
         nil
 
       {reversed_prefix, false} ->
-        distribution = distribution(params, Enum.reverse(reversed_prefix), temperature)
+        prefix = Enum.reverse(reversed_prefix)
+        distribution = distribution(params, prefix, temperature)
         chosen = Vocab.id_to_word(Tensor.weighted_random_index(distribution))
         step = %{distribution: distribution, chosen: chosen}
+        done? = chosen == Vocab.end_token()
 
-        {step, {[chosen | reversed_prefix], chosen == Vocab.end_token()}}
+        {step, {[chosen | reversed_prefix], done?}}
     end)
     |> Enum.take(max_tokens)
   end

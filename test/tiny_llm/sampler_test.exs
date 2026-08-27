@@ -23,7 +23,6 @@ defmodule TinyLlm.SamplerTest do
 
   use ExUnit.Case, async: true
 
-  alias TinyLlm.Grammar
   alias TinyLlm.Model
   alias TinyLlm.Sampler
   alias TinyLlm.Train
