@@ -1,5 +1,7 @@
 # the llama who chases the dogs
 
+## Section
+
 **Attention from scratch, in Elixir.**
 
 ```elixir
@@ -754,12 +756,15 @@ probes = Grammar.corpus(3_000) |> Enum.reject(&MapSet.member?(seen, &1)) |> Eval
 scores = [
   {"bigram, counted", Eval.bigram_predictor(counted)},
   {"embedder, learned", Eval.embedder_predictor(embedder.params)},
-  {"model, one block", Eval.model_predictor(trained)}
+  {"transformer, one block", Eval.model_predictor(trained)}
 ]
 
 Kino.DataTable.new(
   Enum.map(scores, fn {label, predict} ->
-    %{model: label, "agreement accuracy" => "#{Float.round(Eval.agreement(predict, probes) * 100, 1)}%"}
+    %{
+      "model" => label,
+      "agreement accuracy" => "#{Float.round(Eval.agreement(predict, probes) * 100, 1)}%"
+    }
   end)
 )
 ```
