@@ -128,7 +128,7 @@ Grammar.corpus(12)
 ```
 the llama who chases the dogs flees
     ^^^^^                     ^^^^^   subject and verb, both singular
-                      ^^^^            distractor: plural, and nearest the verb
+                         ^^^^         distractor: plural, and nearest the verb
 ```
 
 Fifteen percent of subjects take a relative clause, which drops a **distractor
@@ -372,8 +372,8 @@ plural essentially every time, and it will be wrong essentially every time.
 
 ```
 the llama who chases the dogs ___
-                      ^^^^        the only thing a bigram can see
-    ^^^^^                         the only thing that matters
+                         ^^^^         the only thing a bigram can see
+    ^^^^^                             the only thing that matters
 ```
 
 It does not fail at agreement in general. It fails **precisely and only** when
