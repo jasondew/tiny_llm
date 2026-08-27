@@ -183,6 +183,23 @@ defmodule TinyLlm.Tensor do
   end
 
   @doc """
+  A row scaled to length 1, keeping its direction.
+
+  The Euclidean counterpart to `normalize/1`, which divides by the sum
+  instead. Reach for this one when a row is a direction and for that one
+  when it is a set of counts; they are not interchangeable and the mistake
+  is silent, since both return something that looks plausible.
+
+  A row of length zero has no direction to keep and is returned untouched.
+  """
+  @spec unit(row()) :: row()
+  def unit(row) do
+    length = :math.sqrt(dot(row, row))
+
+    if length == 0.0, do: row, else: Enum.map(row, &(&1 / length))
+  end
+
+  @doc """
   Each row divided by its own sum, so every row becomes a distribution.
 
   This is the other way to turn a row into probabilities, and the one to

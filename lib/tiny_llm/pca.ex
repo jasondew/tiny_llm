@@ -53,13 +53,25 @@ defmodule TinyLlm.PCA do
   centroid instead and the picture is nonsense.
   """
   @spec center(Tensor.matrix()) :: Tensor.matrix()
-  def center(_matrix), do: raise("TODO: stage 7")
+  def center(matrix) do
+    rows = length(matrix)
+    means = matrix |> Tensor.transpose() |> Enum.map(fn column -> Enum.sum(column) / rows end)
+
+    for row <- matrix, do: Enum.zip_with(row, means, &-/2)
+  end
 
   @doc """
   The covariance matrix of centered data: `Xᵀ X` over `rows - 1`.
   """
   @spec covariance(Tensor.matrix()) :: Tensor.matrix()
-  def covariance(_centered), do: raise("TODO: stage 7")
+  def covariance(centered) do
+    rows = length(centered)
+
+    centered
+    |> Tensor.transpose()
+    |> Tensor.matmul(centered)
+    |> Tensor.scale(1 / (rows - 1))
+  end
 
   @doc """
   The dominant eigenvector of a symmetric matrix, by power iteration.
@@ -69,7 +81,15 @@ defmodule TinyLlm.PCA do
   more than a 32 by 32 covariance needs.
   """
   @spec dominant_eigenvector(Tensor.matrix(), pos_integer()) :: Tensor.row()
-  def dominant_eigenvector(_matrix, _iterations \\ 100), do: raise("TODO: stage 7")
+  def dominant_eigenvector(matrix, iterations \\ 100) do
+    [start] = Tensor.random(1, length(matrix), 1.0)
+
+    Enum.reduce(1..iterations, Tensor.unit(start), fn _iteration, vector ->
+      [stretched] = Tensor.matmul([vector], matrix)
+
+      Tensor.unit(stretched)
+    end)
+  end
 
   @doc """
   The two leading principal components, as unit rows.
@@ -80,7 +100,21 @@ defmodule TinyLlm.PCA do
   than being the same direction over again.
   """
   @spec components(Tensor.matrix()) :: {Tensor.row(), Tensor.row()}
-  def components(_matrix), do: raise("TODO: stage 7")
+  def components(matrix) do
+    covariance = matrix |> center() |> covariance()
+    first = dominant_eigenvector(covariance)
+
+    # Deflation: strip the first component out of the covariance so the next
+    # iteration cannot rediscover it. The eigenvalue is how far the matrix
+    # stretches its own eigenvector, which is what this quadratic form says.
+    [stretched] = Tensor.matmul([first], covariance)
+    eigenvalue = Tensor.dot(first, stretched)
+
+    deflated =
+      Tensor.sub(covariance, Tensor.scale(Tensor.outer_product(first, first), eigenvalue))
+
+    {first, dominant_eigenvector(deflated)}
+  end
 
   @doc """
   Every row of a matrix projected onto its own two leading components.
@@ -89,5 +123,11 @@ defmodule TinyLlm.PCA do
   ready to hand to VegaLite alongside the words themselves.
   """
   @spec project(Tensor.matrix()) :: [{float(), float()}]
-  def project(_matrix), do: raise("TODO: stage 7")
+  def project(matrix) do
+    {first, second} = components(matrix)
+
+    for row <- center(matrix) do
+      {Tensor.dot(row, first), Tensor.dot(row, second)}
+    end
+  end
 end

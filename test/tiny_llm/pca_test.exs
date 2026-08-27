@@ -117,10 +117,15 @@ defmodule TinyLlm.PCATest do
     end
 
     test "orders them by how much the data varies along each" do
-      # Spread 100 wide on x and 1 wide on y, so the first component is the
-      # x axis and the second is the y axis, not the other way round.
+      # Chosen so the covariance is exactly diagonal: x and y are
+      # uncorrelated, x varies 500 times as much, so the components are the
+      # axes themselves and the only question is which comes first.
+      #
+      # Collinear data would not test this. Points along y = x/100 have a
+      # top component of [0.99995, 0.01], the direction of the line, and no
+      # second component worth the name.
       PCA.seed(5)
-      rows = for step <- 1..10, do: [step * 10.0, step * 0.1]
+      rows = [[-3.0, -0.1], [-1.0, 0.1], [1.0, 0.1], [3.0, -0.1]]
       {first, second} = PCA.components(rows)
 
       assert aligned?(first, [1.0, 0.0])
