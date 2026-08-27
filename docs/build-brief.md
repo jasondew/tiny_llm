@@ -255,6 +255,24 @@ embedding PCA scatter (expect POS clusters + parallel singular→plural
 offsets) →
 probe-sentence attention heatmap → temperature slider (Kino.Control) with
 per-step probability bars.
+
+**The temperature slider's range is 0 to 3**, measured. Grammaticality
+falls 100% / 96.5% / 89.5% / 71.5% / 59% / 29.5% at temperatures 0, 0.5, 1,
+1.5, 2, 3 and is already word salad past 3, so a 0 to 2 slider would show
+almost nothing and a 0 to 10 one would waste two thirds of its travel.
+
+The pairing to put on screen is grammaticality against distinctness, since
+they trade off directly: at 0.0 the model is 100% grammatical and 0.5%
+distinct, saying one sentence forever; at 1.0 it is 89.5% grammatical and
+90.5% distinct. Temperature is the dial between correct-and-boring and
+varied-and-wrong, and it is watchable.
+
+Two details worth a sentence each. The model's single most likely sentence,
+`the fast dogs and the llamas are fast .`, does not appear in the training
+corpus. And the failure modes come apart in layers rather than at random:
+`a llama is dog` keeps the syntax and loses the semantics, `the sleepy fast
+chase the llamas` drops the noun, `sleepy fast goose dogs flee` loses the
+determiner. The outer structure goes first.
 **Accept:** Livebook runs top-to-bottom on a fresh machine with only
 Livebook installed; the probe heatmap is legible and the verb position's
 attention is visibly structured rather than flat.
@@ -263,8 +281,31 @@ Do **not** gate on the verb position attending to `llama` over `dogs`,
 which is what this criterion asked for until stage 4 measured it. The
 stage 4 model attends 0.11 to `llama` and 0.19 to `dogs` and still predicts
 the singular verb correctly, because it reads the subject's number off the
-embedded verb `chases` (0.30). Re-measure once stage 5 lands, and let the
-slide say what the heatmap shows rather than what it ought to.
+embedded verb `chases` (0.30).
+
+**Re-measured on the stage 5 model, and the criterion still must not gate
+on it.** The mechanism changed and got no more legible. On `the llama who
+chases the dogs`, the verb position now attends 0.55 to `who`, 0.17 to the
+distractor `dogs` and 0.13 to the subject `llama`.
+
+The `who` mass carries no number information whatsoever. This is one
+attention layer, so the value at position 3 is built from that position's
+own input, `embedding("who") + P[3]`, which is identical in both probes.
+Over half the verb position's attention goes somewhere that cannot
+disambiguate singular from plural.
+
+**What the heatmap does show is the argument for depth**, and it is a
+better slide than the original criterion would have been. Look at the `who`
+row: it attends 0.57 to `llama`, and 0.65 to `dogs` in the mirror probe. The
+`who` position has gathered the head noun into itself, so its *output* is a
+summary of the subject. The model has built half of a two-hop route, head
+noun into `who`, then `who` into the verb position, and with one block it
+cannot use the second half: both hops run in parallel, not in sequence. A
+second block would read the first block's output at `who` and get the
+subject for free. That is what depth buys, drawn by the model itself.
+
+The attention sink from stage 4 survives: the first verb position puts 0.96
+on `<start>`.
 
 ## Definition of done
 
