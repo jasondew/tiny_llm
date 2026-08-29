@@ -3,7 +3,7 @@
 ## What this is
 
 A complete decoder-only transformer language model in **pure Elixir stdlib**,
-built as the companion artifact to a 30-minute conference talk:
+built as the companion artifact to a 60-minute conference talk:
 **"the llama who chases the dogs"**, subtitled *"Attention from scratch, in
 Elixir."* Lowercase on purpose: the title is the probe sentence, a string of
 tokens the model reads, and every word in the vocabulary is lowercase.
@@ -11,7 +11,7 @@ Audience: Elixir engineers curious about AI. Every module may end up on a
 slide and the repo link appears on every slide, so **the code IS the talk**.
 
 The model: 32-word vocabulary, context length 16, d_model 32, one attention
-head, one transformer block, ~13K parameters. Trained on sentences generated
+head, one transformer block, ~15K parameters. Trained on sentences generated
 by a probabilistic grammar we own, so ground truth is knowable. Training
 must complete in seconds-to-a-minute on a laptop CPU.
 
