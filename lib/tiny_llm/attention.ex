@@ -89,7 +89,7 @@ defmodule TinyLlm.Attention do
           keys: Tensor.matrix(),
           values: Tensor.matrix(),
           weights: Tensor.matrix(),
-          context: Tensor.matrix(),
+          attention: Tensor.matrix(),
           output: Tensor.matrix()
         }
 
@@ -100,7 +100,7 @@ defmodule TinyLlm.Attention do
           keys: Tensor.matrix(),
           values: Tensor.matrix(),
           weights: Tensor.matrix(),
-          context: Tensor.matrix(),
+          attention: Tensor.matrix(),
           output: Tensor.matrix(),
           logits: Tensor.matrix()
         }
@@ -210,7 +210,7 @@ defmodule TinyLlm.Attention do
       end)
       |> Tensor.softmax()
 
-    context = Tensor.matmul(weights, values)
+    attention = Tensor.matmul(weights, values)
 
     %{
       input: input,
@@ -218,8 +218,8 @@ defmodule TinyLlm.Attention do
       keys: keys,
       values: values,
       weights: weights,
-      context: context,
-      output: Tensor.matmul(context, params.output_weight)
+      attention: attention,
+      output: Tensor.matmul(attention, params.output_weight)
     }
   end
 
@@ -235,11 +235,11 @@ defmodule TinyLlm.Attention do
   def attend_backward(params, cache, doutput) do
     d_model = length(hd(cache.input))
 
-    doutput_weight = Tensor.matmul(Tensor.transpose(cache.context), doutput)
-    dcontext = Tensor.matmul(doutput, Tensor.transpose(params.output_weight))
+    doutput_weight = Tensor.matmul(Tensor.transpose(cache.attention), doutput)
+    dattention = Tensor.matmul(doutput, Tensor.transpose(params.output_weight))
 
-    dweights = Tensor.matmul(dcontext, Tensor.transpose(cache.values))
-    dvalues = Tensor.matmul(Tensor.transpose(cache.weights), dcontext)
+    dweights = Tensor.matmul(dattention, Tensor.transpose(cache.values))
+    dvalues = Tensor.matmul(Tensor.transpose(cache.weights), dattention)
 
     # The mask was additive and the masked weights are exactly 0.0, so the
     # mask needs no code here at all: those entries come back exactly 0.0.
