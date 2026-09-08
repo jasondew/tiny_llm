@@ -13,6 +13,13 @@ blank back to `llama`. It is a complete decoder-only transformer language
 model in the **pure Elixir standard library**, and it is the companion
 artifact to a 60 minute conference talk.
 
+The slide deck lives in
+[`tiny_llm_talk`](https://github.com/jasondew/tiny_llm_talk). It is a
+Phoenix LiveView app that depends on this repo by path, so every number on
+every slide comes from the model rather than from a screenshot. It sits
+beside this repo rather than inside it, which is what keeps the dependency
+list here empty.
+
 ## From nothing means from nothing
 
 * No Nx, no Axon, no hex packages. `mix.exs` deps are empty.
@@ -137,6 +144,15 @@ docs/
   talk-outline.md the design for the slide deck
 notebooks/        the Livebook
 scripts/demo.exs  the closing slide, as a script
+```
+
+The deck expects the two repos to be siblings, since it depends on this one
+by relative path:
+
+```
+~/src/
+  tiny_llm/       the model, zero deps
+  tiny_llm_talk/  the deck, path dep on ../tiny_llm
 ```
 
 Start with `lib/tiny_llm/attention.ex`. That is the one the talk is about,
