@@ -43,3 +43,13 @@ as five arrows can get. A quirk worth knowing: at 0.8 the model kept
 features 0, 1, 2 and 4 but dropped 3, so a less important feature
 survived over a more important one. Training finds a good arrangement,
 not always the best one.
+
+## Labels (2026-10-28)
+
+The speaker checked the key idea: in `the llama who chases the dogs`, the
+next verb still needs singular at `dogs`, because `llama` is the subject
+still waiting for its verb. That gap is the distractor case.
+
+In 2,000 generated sentences, the cold open case (a relative clause whose
+object has the other number, followed by a present tense main verb)
+appears only 48 times, so probe accuracy is measured on a larger corpus.

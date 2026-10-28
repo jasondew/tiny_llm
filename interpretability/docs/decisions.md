@@ -40,3 +40,15 @@ resampling long sentences barely skews the rates.
 
 The first talk used 16. Nested relative clauses do not fit in 16 tokens.
 This changes the positional table only; `d_model` stays 32.
+
+## Agreement labels use left context only
+
+`:agreement_number` is the number the next verb would need given only the
+words read so far. A label that knew the rest of the sentence would let a
+feature score well for information the model cannot have, which would
+inflate every precision and recall built on it.
+
+## Connective words carry no role
+
+`who`, `that`, `and`, `near` and `behind` get `role: nil`. Role belongs to
+the words that make up a noun: determiners, adjectives, nouns, pronouns.
