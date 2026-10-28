@@ -24,3 +24,19 @@ the grammar adds (animacy, tense, pronouns, prepositional distractors,
 relative clauses on objects). More nouns or adjectives would add word
 identities without adding concepts, which the spec rules out as growth
 for its own sake.
+
+## Grammar probabilities
+
+Subject: simple 50, compound 12, relative clause 18, prepositional 12,
+pronoun 8. Object: simple 80, relative clause 20 (until two clauses
+deep). Subjects animate 80%, objects 70%. Tense present 70%, past 30%.
+Simple sentences stay the majority so the model learns the basics first;
+every distractor construction still appears in roughly one sentence in
+eight or more. With seed 11, 10,000 sentences average 7.4 tokens, 249
+have two relative clauses, and only 7 reach the 20 token limit, so
+resampling long sentences barely skews the rates.
+
+## Context length 20
+
+The first talk used 16. Nested relative clauses do not fit in 16 tokens.
+This changes the positional table only; `d_model` stays 32.
