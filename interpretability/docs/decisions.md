@@ -16,3 +16,11 @@ Without EXLA, one full toy run (3,000 steps of 1,024 examples) takes about
 160 seconds on the M1 Max. With EXLA it takes well under a second. That is
 too slow for a live slider in the deck, so, as the spec allows, the deck
 will scrub through `priv/results/toy_sweep.etf` instead of training live.
+
+## A 70 word vocabulary
+
+The spec expected 80 to 150 words. 70 is enough to carry every concept
+the grammar adds (animacy, tense, pronouns, prepositional distractors,
+relative clauses on objects). More nouns or adjectives would add word
+identities without adding concepts, which the spec rules out as growth
+for its own sake.
