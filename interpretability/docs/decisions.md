@@ -52,3 +52,24 @@ inflate every precision and recall built on it.
 
 `who`, `that`, `and`, `near` and `behind` get `role: nil`. Role belongs to
 the words that make up a noun: determiners, adjectives, nouns, pronouns.
+
+## Training run: 8,000 steps on 60,000 sentences
+
+The plan's starting point (4,000 steps, 20,000 sentences) missed the gate:
+the cold open case scored 0.933 on 448 probes. More steps alone helped
+and then hurt (0.953 at 8,000, 0.935 at 16,000), and evaluation loss
+rose with them (1.986, 1.994, 2.013): the model was memorising a corpus
+it had seen too often. More sentences fixed it:
+
+| Steps | Corpus | Evaluation loss | Cold open case |
+| --- | --- | --- | --- |
+| 4,000 | 20,000 | 1.9857 | 0.9330 |
+| 8,000 | 20,000 | 1.9941 | 0.9531 |
+| 16,000 | 20,000 | 2.0126 | 0.9353 |
+| 8,000 | 60,000 | 1.9635 | 0.9911 |
+| 16,000 | 100,000 | 1.9667 | 0.9777 |
+
+8,000 steps on 60,000 sentences trains in about 36 seconds on the M1 Max
+CPU with EXLA. `d_model` and the MLP width were not touched. Probe
+accuracy is measured on a separate 20,000 sentence corpus (seed + 1),
+because the cold open case appears in only about one sentence in forty.

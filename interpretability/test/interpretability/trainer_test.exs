@@ -12,7 +12,11 @@ defmodule Interpretability.TrainerTest do
 
   setup do
     inputs = Nx.linspace(-1.0, 1.0, n: 256)
-    %{batches: Stream.repeatedly(fn -> %{inputs: inputs, outputs: Nx.add(Nx.multiply(inputs, 3), 1)} end)}
+
+    %{
+      batches:
+        Stream.repeatedly(fn -> %{inputs: inputs, outputs: Nx.add(Nx.multiply(inputs, 3), 1)} end)
+    }
   end
 
   test "fits a straight line", %{batches: batches} do
