@@ -157,3 +157,10 @@ by relative path:
 
 Start with `lib/tiny_llm/attention.ex`. That is the one the talk is about,
 and its moduledoc carries the derivation.
+
+## Sequel: interpretability/
+
+`interpretability/` is a separate Mix project for the follow up talk,
+"where the llama keeps its grammar". It has its own dependencies (Nx) and
+its own `CLAUDE.md`. Nothing above changes because of it: this project
+still has zero dependencies.

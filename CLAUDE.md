@@ -63,3 +63,9 @@ refactor them except to add functions.
 
 When in doubt about scope: smaller and clearer wins. This codebase's job is
 to fit in someone's head.
+
+## The sequel lives next door
+
+`interpretability/` is a nested Mix project for the second talk. Its own
+`CLAUDE.md` governs it. The constraints above still bind everything
+outside that directory.
