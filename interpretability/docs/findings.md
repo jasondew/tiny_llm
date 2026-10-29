@@ -92,3 +92,56 @@ phrase, while a relative clause can be long and can nest.
 
 **Where the prediction missed.** The instinct about `and` was right; it
 just makes the compound subject the easiest case, not the hardest.
+
+## How clean are the raw neurons? (2026-10-29)
+
+**Prediction.** 40 of the 128 neurons are monosemantic, mostly matching
+individual words.
+
+**Result** (`mix interp.neurons`, 14,713 words from the 2,000 evaluation
+sentences): **0 of 128 neurons are monosemantic.** None never fires; the
+median neuron fires on 15% of words. Best F1 per neuron:
+
+| Best F1 | Neurons |
+| --- | --- |
+| 0.1 to 0.2 | 1 |
+| 0.2 to 0.3 | 7 |
+| 0.3 to 0.4 | 13 |
+| 0.4 to 0.5 | 25 |
+| 0.5 to 0.6 | 25 |
+| 0.6 to 0.7 | 22 |
+| 0.7 to 0.8 | 27 |
+| 0.8 to 0.9 | 8 |
+| 0.9 to 1.0 | 0 |
+
+The cleanest neurons match broad parts of speech, not words: neuron 88
+fires on every `<start>` (recall 1.0) but a fifth of its firings are
+elsewhere (precision 0.81); neurons 113, 57 and 33 catch every copula
+with precision about 0.75. Their best labels by kind: part of speech 66,
+after the main verb 15, word 12, agreement number 9, animacy 9, role 6,
+word number 5, depth 5, tense 1.
+
+The messiest neurons mix things. Neuron 32 fires on the verb right after
+`who`, mostly when the subject is plural (`the owls who [slept]`, `the
+cats who [flee]`): part depth, part agreement, part position. Neuron 72
+fires on `who` after an object, and on a noun after `near`. Neuron 64
+fires on the last word of a finished sentence (`... ignore a small wet
+[wolf]`, `... were [small]`), a concept our labels do not have: "the
+sentence could end here".
+
+**Explanation for the stage.** A neuron is not a concept. The cleanest
+ones are broad (every copula, plus some extra) and the rest are mixtures,
+which is what superposition predicts: the model has more to track than
+it has neurons, so it spreads concepts across them. If you went looking
+for "the plural neuron" here, you would not find one.
+
+**Where the prediction missed.** 40 clean neurons was far too
+optimistic; there are none. And the best matches are grammar categories,
+not single words: a neuron that fired only on `who` would waste a whole
+neuron on one word out of 70.
+
+**Open question for the speaker.** Neuron 64 suggests the labels are
+missing at least one concept the model clearly uses: "a sentence could
+end here". It is computable from left context. Adding it would make the
+answer key more complete; leaving it out is a good honest Q&A answer
+("our labels are only the concepts we thought of").
