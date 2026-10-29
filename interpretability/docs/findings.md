@@ -170,3 +170,67 @@ neuron clean. Here the concept is spread across many neurons, each
 covering part of it, rather than packed into one. Whether the SAE can
 gather those slices back into a single clean feature is the head to head
 question.
+
+## The first SAE, head to head with the neurons (2026-10-29)
+
+**Prediction.** 0 of 512 features monosemantic; a few dead features; the
+SAE wins the head to head; one SAE feature captures `can_end` cleanly.
+
+**Result** (`mix interp.sae`, 512 features, 8 active, trained in 138
+seconds on the activations of 20,000 training sentences, measured on the
+2,000 evaluation sentences):
+
+| Measure | Value |
+| --- | --- |
+| Variance explained | 98.9% |
+| Model loss with its own neurons | 1.9635 |
+| Model loss with the SAE spliced in | 1.9657 |
+| Model loss with the neurons switched off | 2.7664 |
+| Loss recovered | 99.7% |
+| Dead features | 32 of 512 |
+| Dense features (on for over half of all words) | 0 |
+| Monosemantic at 0.9 | **33 of 512 features**, against 0 of 128 neurons |
+
+The 33 clean features are 21 single words (`he`, `they`, `ignores`,
+`near`, `behind`, ...) and 12 parts of speech (copula, conjunction, and
+seven separate `<start>` features).
+
+Head to head, best neuron against best feature for each label, a win
+needing 0.05 more F1:
+
+| Labels | Features win | Neurons win | Ties |
+| --- | --- | --- | --- |
+| 69 single words | 69 | 0 | 0 |
+| 29 grammar labels | 9 | 14 | 6 |
+
+The features win the closed class words outright (copula 1.00 against
+0.85, preposition 0.91 against 0.45, conjunction 1.00 against 0.46). The
+neurons win the abstract concepts: agreement number plural 0.65 against
+0.40, subject role 0.67 against 0.52, after the main verb 0.76 against
+0.49. On those, every feature is precise but partial: the best plural
+agreement feature is right 100% of the time it fires and catches 25% of
+cases. 20 different features are at least 90% precise for plural
+agreement, and 28 for `can_end`. The SAE has split each abstract concept
+into many narrow pieces (`can_end`: one feature at 0.99 precision and
+0.72 recall, tied with the best neuron at F1 0.83).
+
+**Explanation for the stage.** The SAE is faithful: splice it in and the
+model barely notices (99.7% of the loss recovered), so it is not
+inventing things. It finds clean units for words and grammar words,
+where the neurons had none. For the ideas the talk is about, like "the
+subject is plural", it does not find one clean unit. It finds twenty
+precise slices, each covering a different situation, which is the
+feature splitting "Towards Monosemanticity" describes. Neither camp
+wins outright: the SAE cleans up what the neurons smeared, but the
+deeper grammar is spread out on both sides.
+
+**Where the prediction missed.** Zero clean features was too pessimistic:
+33. "A few" dead features was 32, about 6%. "The SAE wins" is true for
+words and false for grammar concepts. One clean `can_end` feature: no,
+28 precise fragments, the best catching 72%.
+
+**Risk for steering (November 20).** Steering needs a "plural subject"
+direction. No single feature is one. Options: steer with the sum of the
+plural agreement fragments, steer with the best neuron, or train a
+narrower SAE (fewer features, less splitting). This is now the most
+useful reason to run the width experiment.

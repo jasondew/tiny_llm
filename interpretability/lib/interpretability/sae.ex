@@ -184,12 +184,20 @@ defmodule Interpretability.SAE do
   def report(sae, active_count, model_params, dataset, activations) do
     loss_original = Nx.to_number(Model.evaluate_loss(model_params, dataset))
 
-    loss_spliced =
-      Nx.to_number(
-        Model.evaluate_loss(model_params, dataset,
-          edit_hidden: &reconstruct(sae, &1, active_count: active_count)
-        )
+    # The SAE goes in as an argument, not inside a closure, so its tensors
+    # can live on any backend.
+    spliced =
+      Nx.Defn.jit(
+        fn model_params, sae, batch ->
+          Model.loss(model_params, batch,
+            edit_hidden: &reconstruct(sae, &1, active_count: active_count)
+          )
+        end,
+        Compiler.options()
       )
+
+    loss_spliced =
+      Nx.to_number(spliced.(model_params, sae, Map.take(dataset, [:tokens, :targets, :mask])))
 
     loss_zero_ablated =
       Nx.to_number(Model.evaluate_loss(model_params, dataset, edit_hidden: &Nx.multiply(&1, 0.0)))

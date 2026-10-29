@@ -40,6 +40,10 @@ defmodule Interpretability.Scoring do
           top: [grade()]
         }
 
+  import Nx.Defn
+
+  alias Interpretability.Compiler
+
   @top_count 3
 
   @doc """
@@ -125,17 +129,15 @@ defmodule Interpretability.Scoring do
     threshold_fraction = Keyword.get(options, :threshold_fraction, 0.2)
     {label_names, label_matrix} = label_matrix(indicators(labels))
 
-    maximum = Nx.reduce_max(activations, axes: [0], keep_axes: true)
+    {true_positives, fire_counts, label_counts} =
+      Nx.Defn.jit(&tallies(&1, &2, threshold_fraction: threshold_fraction), Compiler.options()).(
+        activations,
+        label_matrix
+      )
 
-    fires =
-      activations
-      |> Nx.greater(Nx.multiply(maximum, threshold_fraction))
-      |> Nx.logical_and(Nx.greater(maximum, 0))
-      |> Nx.as_type(:f32)
-
-    true_positives = counts(Nx.dot(fires, [0], label_matrix, [0]))
-    fire_counts = counts(Nx.sum(fires, axes: [0]))
-    label_counts = counts(Nx.sum(label_matrix, axes: [0]))
+    true_positives = counts(true_positives)
+    fire_counts = counts(fire_counts)
+    label_counts = counts(label_counts)
 
     grades =
       Enum.zip_with(true_positives, fire_counts, fn unit_true_positives, fire_count ->
@@ -149,6 +151,20 @@ defmodule Interpretability.Scoring do
       end)
 
     %{grades: grades, fire_counts: fire_counts}
+  end
+
+  # The heavy part, compiled: which tokens each unit fires on, and how many
+  # of those carry each label. With 512 features and about 200 labels over
+  # 15,000 tokens, this is billions of multiply adds.
+  defnp tallies(activations, label_matrix, opts \\ []) do
+    maximum = Nx.reduce_max(activations, axes: [0], keep_axes: true)
+
+    fires =
+      (activations > maximum * opts[:threshold_fraction] and maximum > 0)
+      |> Nx.as_type(:f32)
+
+    {Nx.dot(fires, [0], label_matrix, [0]), Nx.sum(fires, axes: [0]),
+     Nx.sum(label_matrix, axes: [0])}
   end
 
   defp label_matrix(indicators) do
