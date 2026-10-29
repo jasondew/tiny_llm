@@ -69,6 +69,10 @@ it had seen too often. More sentences fixed it:
 | 8,000 | 60,000 | 1.9635 | 0.9911 |
 | 16,000 | 100,000 | 1.9667 | 0.9777 |
 
+These evaluation losses were measured before the evaluation set was
+deduplicated against training (38.6% overlap); the held out loss of the
+chosen run is 2.0096. The comparison between runs stands.
+
 8,000 steps on 60,000 sentences trains in about 36 seconds on the M1 Max
 CPU with EXLA. `d_model` and the MLP width were not touched. Probe
 accuracy is measured on a separate 20,000 sentence corpus (seed + 1),
@@ -99,3 +103,11 @@ features that stay on. The cost: "Towards Monosemanticity" (2023) used an
 L1 penalty, so this differs from the paper the talk cites, and
 `hard-questions.md` says so. The SAE trains on the activations of the
 first 20,000 training sentences.
+
+## Held out evaluation, no <start> rows, informative labels only
+
+Evaluation and probe sentences skip any sentence that also appears in
+training. Activations start at position 1, because `<start>` is the same
+vector in every sentence. The neuron against feature comparison leaves
+out labels true for more than half of all words, which any always on unit
+wins and no sparse feature can.

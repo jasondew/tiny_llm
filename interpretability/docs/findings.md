@@ -234,3 +234,41 @@ direction. No single feature is one. Options: steer with the sum of the
 plural agreement fragments, steer with the best neuron, or train a
 narrower SAE (fewer features, less splitting). This is now the most
 useful reason to run the width experiment.
+
+## Correction after the final review (2026-10-29)
+
+A fresh reviewer found three ways the numbers above overstated
+themselves, and all three are fixed:
+
+- **The evaluation set was not held out.** 772 of the 2,000 evaluation
+  sentences (38.6%) also appeared in training, because the grammar repeats
+  short sentences. Evaluation and probe sentences now skip anything seen
+  in training.
+- **`<start>` was counted 2,000 times.** Position 0 is the same vector in
+  every sentence, which gave the SAE seven features for one fact.
+  Activations now start at position 1.
+- **Labels true for most words favoured the neurons.** A unit that fires
+  everywhere beats both sides on `depth = 0` or `can_end = false`, and a
+  sparse feature never can. The head to head now leaves out labels true
+  for more than half of all words.
+
+The model itself did not change (same training data, same cold open
+scores). The corrected numbers, which supersede the ones above:
+
+| Measure | Before | Corrected |
+| --- | --- | --- |
+| Evaluation loss | 1.9635 | 2.0096 (held out) |
+| Cold open case accuracy | 0.9911 | 0.9911 (448 probes, all unseen) |
+| Neurons monosemantic | 0 of 128 | 0 of 128 |
+| SAE features monosemantic | 33 of 512 | **23 of 512**, covering 22 distinct labels |
+| Loss recovered by the SAE | 99.7% | 100.0% (2.0095 spliced against 2.0096) |
+| Dead features | 32 | 31 |
+| Single word labels, features win | 69 of 69 | 67 of 67 |
+| Grammar labels, features / neurons / ties | 9 / 14 / 6 | **7 / 12 / 6** of 25 |
+| Precise fragments for plural agreement | 20 | 17 |
+| Precise fragments for `can_end` | 28 | 36 |
+
+The story is unchanged and now rests on cleaner numbers: the SAE is
+faithful, it wins every single word, and on abstract grammar concepts the
+best neuron still beats the best feature more often than not, because the
+SAE splits each concept into many precise fragments.
