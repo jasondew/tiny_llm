@@ -152,6 +152,19 @@ defmodule Interpretability.Model do
   end
 
   @doc """
+  The training and evaluation datasets for `config`, drawn from the
+  grammar in that order from the config's seed. Every task that needs
+  "the" evaluation set gets the same sentences this way.
+  """
+  @spec datasets(Config.t()) :: {Dataset.t(), Dataset.t()}
+  def datasets(%Config{} = config) do
+    Interpretability.Grammar.seed(config.seed)
+    training = Dataset.build(Interpretability.Grammar.trees(config.training_corpus_size))
+    evaluation = Dataset.build(Interpretability.Grammar.trees(config.evaluation_corpus_size))
+    {training, evaluation}
+  end
+
+  @doc """
   A function from the words read so far to a score for every word in the
   vocabulary, for `Interpretability.Probes`.
   """

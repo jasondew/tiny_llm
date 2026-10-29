@@ -18,7 +18,6 @@ defmodule Mix.Tasks.Interp.Train do
   use Mix.Task
 
   alias Interpretability.Checkpoint
-  alias Interpretability.Dataset
   alias Interpretability.Grammar
   alias Interpretability.Model
   alias Interpretability.Probes
@@ -42,9 +41,7 @@ defmodule Mix.Tasks.Interp.Train do
         training_corpus_size: Keyword.get(switches, :corpus, defaults.training_corpus_size)
     }
 
-    Grammar.seed(config.seed)
-    training = Dataset.build(Grammar.trees(config.training_corpus_size))
-    evaluation = Dataset.build(Grammar.trees(config.evaluation_corpus_size))
+    {training, evaluation} = Model.datasets(config)
     Grammar.seed(config.seed + 1)
     probes = Enum.flat_map(Grammar.trees(@probe_corpus_size), &Probes.from_tree/1)
 
