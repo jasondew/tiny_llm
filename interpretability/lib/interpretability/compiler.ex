@@ -21,4 +21,14 @@ defmodule Interpretability.Compiler do
   def options do
     if Code.ensure_loaded?(EXLA), do: [compiler: EXLA], else: []
   end
+
+  @doc """
+  The backend to keep large tensors on while training: EXLA's when it is
+  loaded, so batches are gathered where the math runs.
+  """
+  @spec backend() :: module()
+  def backend do
+    exla_backend = Module.concat([EXLA, Backend])
+    if Code.ensure_loaded?(exla_backend), do: exla_backend, else: Nx.BinaryBackend
+  end
 end

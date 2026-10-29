@@ -54,6 +54,26 @@ defmodule Interpretability.ScoringTest do
     assert score.best.f1 == 0.0
   end
 
+  test "by_label finds the best unit for every label" do
+    activations =
+      Nx.tensor([
+        [0.0, 1.0],
+        [0.0, 1.0],
+        [2.0, 0.0],
+        [0.0, 1.0],
+        [1.5, 0.0],
+        [0.0, 1.0]
+      ])
+
+    best = Scoring.by_label(activations, @labels)
+
+    assert best[{:part_of_speech, :noun}] == %{unit: 0, precision: 1.0, recall: 1.0, f1: 1.0}
+    assert best[{:word, "who"}].unit == 1
+    assert best[{:word, "who"}].precision == 0.5
+    assert best[{:word, "who"}].recall == 1.0
+    refute Map.has_key?(best, {:tense, nil})
+  end
+
   test "monosemantic means both precision and recall reach the threshold" do
     assert Scoring.monosemantic?(%{best: %{precision: 0.95, recall: 0.9}})
     refute Scoring.monosemantic?(%{best: %{precision: 0.95, recall: 0.85}})

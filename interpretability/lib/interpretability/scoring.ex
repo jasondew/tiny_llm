@@ -67,8 +67,62 @@ defmodule Interpretability.Scoring do
   """
   @spec score(Nx.Tensor.t(), [map()], keyword()) :: [score()]
   def score(activations, labels, options \\ []) do
-    threshold_fraction = Keyword.get(options, :threshold_fraction, 0.2)
     {token_count, _unit_count} = Nx.shape(activations)
+    %{grades: grades, fire_counts: fire_counts} = grade_table(activations, labels, options)
+
+    [grades, fire_counts]
+    |> Enum.zip()
+    |> Enum.with_index()
+    |> Enum.map(fn {{unit_grades, fire_count}, unit} ->
+      top = unit_grades |> Enum.sort_by(& &1.f1, :desc) |> Enum.take(@top_count)
+      %{unit: unit, firing_rate: fire_count / token_count, best: hd(top), top: top}
+    end)
+  end
+
+  @doc """
+  The other way round: for every label, the unit that matches it best
+  (highest F1). This is how neurons and SAE features are compared head to
+  head: for each concept, how clean is the best unit either side has?
+
+  Takes the same options as `score/3`.
+  """
+  @spec by_label(Nx.Tensor.t(), [map()], keyword()) :: %{
+          label() => %{
+            unit: non_neg_integer(),
+            precision: float(),
+            recall: float(),
+            f1: float()
+          }
+        }
+  def by_label(activations, labels, options \\ []) do
+    %{grades: grades} = grade_table(activations, labels, options)
+
+    grades
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {unit_grades, unit} ->
+      Enum.map(unit_grades, &Map.put(&1, :unit, unit))
+    end)
+    |> Enum.group_by(& &1.label)
+    |> Map.new(fn {label, candidates} ->
+      best = Enum.max_by(candidates, & &1.f1, fn -> nil end)
+      {label, Map.delete(best, :label)}
+    end)
+  end
+
+  @doc """
+  Whether a unit's best label reaches `threshold` on both precision and
+  recall.
+  """
+  @spec monosemantic?(%{best: map()}, float()) :: boolean()
+  def monosemantic?(%{best: best}, threshold \\ 0.9),
+    do: best.precision >= threshold and best.recall >= threshold
+
+  ## PRIVATE FUNCTIONS
+
+  # Every unit graded against every label: one list of grades per unit, in
+  # label order.
+  defp grade_table(activations, labels, options) do
+    threshold_fraction = Keyword.get(options, :threshold_fraction, 0.2)
     {label_names, label_matrix} = label_matrix(indicators(labels))
 
     maximum = Nx.reduce_max(activations, axes: [0], keep_axes: true)
@@ -83,31 +137,19 @@ defmodule Interpretability.Scoring do
     fire_counts = counts(Nx.sum(fires, axes: [0]))
     label_counts = counts(Nx.sum(label_matrix, axes: [0]))
 
-    [true_positives, fire_counts]
-    |> Enum.zip()
-    |> Enum.with_index()
-    |> Enum.map(fn {{unit_true_positives, fire_count}, unit} ->
-      top =
-        [label_names, unit_true_positives, label_counts]
-        |> Enum.zip_with(fn [label, true_positive_count, label_count] ->
+    grades =
+      Enum.zip_with(true_positives, fire_counts, fn unit_true_positives, fire_count ->
+        Enum.zip_with([label_names, unit_true_positives, label_counts], fn [
+                                                                             label,
+                                                                             true_positive_count,
+                                                                             label_count
+                                                                           ] ->
           grade(label, true_positive_count, fire_count, label_count)
         end)
-        |> Enum.sort_by(& &1.f1, :desc)
-        |> Enum.take(@top_count)
+      end)
 
-      %{unit: unit, firing_rate: fire_count / token_count, best: hd(top), top: top}
-    end)
+    %{grades: grades, fire_counts: fire_counts}
   end
-
-  @doc """
-  Whether a unit's best label reaches `threshold` on both precision and
-  recall.
-  """
-  @spec monosemantic?(%{best: map()}, float()) :: boolean()
-  def monosemantic?(%{best: best}, threshold \\ 0.9),
-    do: best.precision >= threshold and best.recall >= threshold
-
-  ## PRIVATE FUNCTIONS
 
   defp label_matrix(indicators) do
     label_names = indicators |> Map.keys() |> Enum.sort()

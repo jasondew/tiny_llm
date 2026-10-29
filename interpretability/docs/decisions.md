@@ -89,3 +89,13 @@ Added after the first neuron report showed neuron 64 firing on the last
 word of finished sentences. True when no clause is still waiting for its
 verb and the word finishes a phrase: a noun, a pronoun, an intransitive
 verb, or a copula's adjective. Left context only, like every other label.
+
+## TopK sparsity, not an L1 penalty
+
+The SAE keeps each word's 8 strongest features and zeroes the rest. The
+sparsity is then a number that fits on a slide ("at most 8 of 512 on at
+once"), with no penalty strength to tune and no shrinking of the
+features that stay on. The cost: "Towards Monosemanticity" (2023) used an
+L1 penalty, so this differs from the paper the talk cites, and
+`hard-questions.md` says so. The SAE trains on the activations of the
+first 20,000 training sentences.
