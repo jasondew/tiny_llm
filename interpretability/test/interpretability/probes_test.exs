@@ -52,4 +52,14 @@ defmodule Interpretability.ProbesTest do
 
     assert Probes.accuracy(always_singular, [plural_probe]) == %{{:simple_subject, false} => 0.0}
   end
+
+  test "held out probes come only from sentences the model never trained on" do
+    config = %Interpretability.Model.Config{training_corpus_size: 300}
+    seen = Interpretability.Model.training_sentences(config)
+    trees = Probes.held_out_trees(config, 300)
+
+    assert length(trees) < 300
+    refute Enum.any?(trees, &MapSet.member?(seen, Interpretability.Grammar.words(&1)))
+    assert Probes.held_out(config, 300) == Enum.flat_map(trees, &Probes.from_tree/1)
+  end
 end

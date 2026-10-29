@@ -19,12 +19,10 @@ defmodule Mix.Tasks.Interp.Train do
   use Mix.Task
 
   alias Interpretability.Checkpoint
-  alias Interpretability.Grammar
   alias Interpretability.Model
   alias Interpretability.Probes
 
   @path "priv/checkpoints/model.etf"
-  @probe_corpus_size 20_000
   @cold_open ~w(the llama who chases the dogs)
 
   @impl Mix.Task
@@ -43,14 +41,7 @@ defmodule Mix.Tasks.Interp.Train do
     }
 
     {training, evaluation} = Model.datasets(config)
-    seen = Model.training_sentences(config)
-    Grammar.seed(config.seed + 1)
-
-    probes =
-      @probe_corpus_size
-      |> Grammar.trees()
-      |> Enum.reject(&MapSet.member?(seen, Grammar.words(&1)))
-      |> Enum.flat_map(&Probes.from_tree/1)
+    probes = Probes.held_out(config)
 
     {microseconds, {params, history}} = :timer.tc(fn -> Model.train(config, training) end)
     Checkpoint.save(%{config: config, params: params, history: history}, @path)

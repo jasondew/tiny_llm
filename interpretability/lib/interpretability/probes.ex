@@ -29,6 +29,7 @@ defmodule Interpretability.Probes do
 
   alias Interpretability.Grammar
   alias Interpretability.Labeler
+  alias Interpretability.Model
   alias Interpretability.Vocab
 
   @type probe :: %{
@@ -63,6 +64,29 @@ defmodule Interpretability.Probes do
         do: [probe(tokens, position, verb_phrase.number, category)],
         else: []
     end)
+  end
+
+  @doc """
+  Probes from `count` fresh grammar sentences drawn from the seed after
+  the config's, skipping any sentence that also appears in training, so
+  every probe is new to the model. The cold open case is rare, about one
+  sentence in forty, so probe corpora are large: 20,000 by default.
+  """
+  @spec held_out(Model.Config.t(), pos_integer()) :: [probe()]
+  def held_out(config, count \\ 20_000),
+    do: Enum.flat_map(held_out_trees(config, count), &from_tree/1)
+
+  @doc """
+  The sentences `held_out/2` takes its probes from.
+  """
+  @spec held_out_trees(Model.Config.t(), pos_integer()) :: [Grammar.sentence_tree()]
+  def held_out_trees(config, count) do
+    seen = Model.training_sentences(config)
+    Grammar.seed(config.seed + 1)
+
+    count
+    |> Grammar.trees()
+    |> Enum.reject(&MapSet.member?(seen, Grammar.words(&1)))
   end
 
   @doc """

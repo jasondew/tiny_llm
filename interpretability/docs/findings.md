@@ -272,3 +272,71 @@ The story is unchanged and now rests on cleaner numbers: the SAE is
 faithful, it wins every single word, and on abstract grammar concepts the
 best neuron still beats the best feature more often than not, because the
 SAE splits each concept into many precise fragments.
+
+## Does training make neurons clean? (2026-10-29)
+
+Goodfire's "Neural Networks Are Already Clean" (2026) argues that
+polysemantic neurons are mostly a training problem, and that a squeezed
+layer makes neurons *coarse* (one broad job) rather than *mixed*. We
+retrained the llama model one change at a time (`mix interp.cleanliness`)
+and sorted every neuron by kind, in this order: *clean* (one label at
+precision and recall 0.9), *coarse* (a family of one label's values, such
+as noun or verb), *combined* (two labels together, such as plural noun),
+*mixed*, or *dead*. *Precise* is a looser count closer to Goodfire's:
+right 90% of the time it fires, catching at least 10% of its label. The
+talk's model is the baseline and was not retrained.
+
+Every variant kept the model as good as before: evaluation loss 2.008 to
+2.023, agreement probes at least 0.997.
+
+| Variant | Clean | Coarse | Combined | Mixed | Dead | Precise |
+| --- | --- | --- | --- | --- | --- | --- |
+| baseline (seeds 1234, 1235, 1236) | 0, 1, 0 | 4, 3, 2 | 0, 0, 0 | 124, 124, 126 | 0 | 8, 18, 8 |
+| weight decay 0.01 | 0 | 4 | 0 | 124 | 0 | 6 |
+| weight decay 0.1 (three seeds) | 3, 3, 3 | 7, 8, 6 | 0, 0, 1 | 118, 116, 118 | 0, 1, 0 | 20, 27, 27 |
+| activity penalty 0.001 | 1 | 0 | 1 | 124 | 2 | 30 |
+| activity penalty 0.01 | 0 | 0 | 1 | 45 | 82 | 7 |
+| SoLU | 3 | 0 | 6 | 119 | 0 | 28 |
+| width 512 (of 512) | 2 | 7 | 0 | 503 | 0 | 35 |
+
+Clean neurons in the baseline at other bars: 0 at 0.8, 1 at 0.75, 3 at
+0.7, 24 at 0.6, 40 at 0.5. The speaker kept 0.9 rather than lower the bar
+after seeing results.
+
+Predictions against results:
+
+| Speaker predicted | Result |
+| --- | --- |
+| No variant gets clean neurons above zero | Mostly right: the best reach 3 of 128 |
+| Messy neurons are mostly coarse | Wrong: 4 coarse, 124 mixed |
+| Width 512 helps a little | Wrong: no help, median F1 fell from 0.50 to 0.44 |
+| More than half the mixed neurons are combined | Wrong: none are |
+| 35 of 128 are precise | Too high: 8 |
+| Weight decay 0.1 does not hold up on new seeds | Wrong: 3 clean on every seed, precise 20 to 27 against 8 to 18 |
+
+What it means:
+
+- **Our neurons really are mixed.** No single label, family of values or
+  pair of labels explains 97% of them, and even the forgiving precise
+  count finds only 6 to 14%. Goodfire's roughly 90% does not reproduce in
+  a model this small, by their kind of yardstick or ours.
+- **Weight decay is the one training change that helps, and only a
+  little.** It holds across three seeds: about 3 clean, 7 coarse and 25
+  precise neurons against 0, 3 and 11. It costs nothing measurable in
+  loss. It moves the needle from 0% to 2%, not to 90%.
+- **Squeezing makes it worse, as superposition predicts.** The strong
+  activity penalty killed 64% of the neurons without hurting the loss,
+  and the survivors became messier (median F1 0.11): the same work packed
+  into fewer neurons.
+- **Room alone does not help.** With 512 neurons for about 190 label
+  values, neither camp's story shows up: no clean neurons and no coarse
+  ones. Nothing in training pushes a concept onto one neuron when it does
+  not have to share.
+- **SoLU** gains a few clean and combined neurons, but its median F1
+  collapses to 0.17, probably because its spiky activations defeat a
+  firing threshold set at 20% of each neuron's maximum.
+
+Limits: labels cover only what the grammar knows, so a neuron tracking
+something unlabeled (position, "a verb comes next") counts as mixed; the
+combined check tries pairs only; the non weight decay variants ran on one
+seed each.

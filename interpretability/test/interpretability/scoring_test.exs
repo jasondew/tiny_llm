@@ -93,6 +93,99 @@ defmodule Interpretability.ScoringTest do
     assert Scoring.monosemantic?(%{best: %{precision: 0.85, recall: 0.85}}, 0.8)
   end
 
+  describe "coarse/3" do
+    # Six tokens: llama, sees, happy, dogs, chases, calm.
+    @mixed_labels [
+      %{word: "llama", part_of_speech: :noun, word_number: :singular},
+      %{word: "sees", part_of_speech: :verb, word_number: :singular},
+      %{word: "happy", part_of_speech: :adjective, word_number: :singular},
+      %{word: "dogs", part_of_speech: :noun, word_number: :plural},
+      %{word: "chases", part_of_speech: :verb, word_number: :singular},
+      %{word: "calm", part_of_speech: :adjective, word_number: nil}
+    ]
+
+    test "a unit for nouns and verbs is coarse: one family, two values" do
+      [single] = Scoring.score(column([1.0, 1.0, 0.0, 1.0, 1.0, 0.0]), @mixed_labels)
+      [coarse] = Scoring.coarse(column([1.0, 1.0, 0.0, 1.0, 1.0, 0.0]), @mixed_labels)
+
+      assert single.best.f1 < 0.9
+      assert coarse.key == :part_of_speech
+      assert coarse.values == [:noun, :verb]
+      assert coarse.precision == 1.0
+      assert coarse.recall == 1.0
+    end
+
+    test "unrelated words do not make a family" do
+      [coarse] = Scoring.coarse(column([1.0, 0.0, 1.0, 0.0, 0.0, 0.0]), @mixed_labels)
+
+      assert coarse.key != :word
+      assert coarse.f1 < 0.9
+    end
+
+    test "a unit that never fires has an empty family" do
+      [coarse] = Scoring.coarse(column([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]), @mixed_labels)
+
+      assert coarse.f1 == 0.0
+    end
+  end
+
+  describe "precise/3" do
+    test "a unit precise on a rare label counts even with low recall" do
+      # Ten tokens; "rare" is true on 4. The unit fires on one of them only.
+      labels = Enum.map(0..9, &%{rare: &1 < 4})
+      activations = column([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+      [precise] = Scoring.precise(activations, labels, min_recall: 0.2)
+
+      assert precise.label == {:rare, true}
+      assert precise.precision == 1.0
+      assert precise.recall == 0.25
+    end
+
+    test "labels true on most tokens and recalls under the minimum are ignored" do
+      labels = Enum.map(0..9, &%{common: &1 < 8})
+      activations = column([1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+      assert [nil] = Scoring.precise(activations, labels)
+      assert [nil] = Scoring.precise(activations, labels, max_base_rate: 1.0, min_recall: 0.5)
+
+      assert [%{label: {:common, true}}] =
+               Scoring.precise(activations, labels, max_base_rate: 1.0)
+    end
+  end
+
+  describe "combined/3" do
+    # Six tokens: llama, dogs, llamas, sees, dog, chase.
+    @combined_labels [
+      %{part_of_speech: :noun, word_number: :singular},
+      %{part_of_speech: :noun, word_number: :plural},
+      %{part_of_speech: :noun, word_number: :plural},
+      %{part_of_speech: :verb, word_number: :singular},
+      %{part_of_speech: :noun, word_number: :singular},
+      %{part_of_speech: :verb, word_number: :plural}
+    ]
+
+    test "a unit for plural nouns matches two labels together" do
+      activations = column([0.0, 1.0, 1.0, 0.0, 0.0, 0.0])
+      [single] = Scoring.score(activations, @combined_labels)
+      [combined] = Scoring.combined(activations, @combined_labels)
+
+      assert single.best.f1 < 0.9
+      assert combined.labels == [{:part_of_speech, :noun}, {:word_number, :plural}]
+      assert combined.precision == 1.0
+      assert combined.recall == 1.0
+    end
+
+    test "works when units are processed in several chunks" do
+      activations = Nx.tile(column([0.0, 1.0, 1.0, 0.0, 0.0, 0.0]), [1, 5])
+
+      combined = Scoring.combined(activations, @combined_labels, chunk_size: 2)
+
+      assert Enum.map(combined, & &1.unit) == [0, 1, 2, 3, 4]
+      assert Enum.all?(combined, &(&1.f1 == 1.0))
+    end
+  end
+
   ## PRIVATE FUNCTIONS
 
   defp column(values), do: Nx.reshape(Nx.tensor(values), {length(values), 1})

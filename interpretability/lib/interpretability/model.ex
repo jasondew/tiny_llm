@@ -42,6 +42,17 @@ defmodule Interpretability.Model do
     @moduledoc """
     The model's size and its training run. `d_model` and `hidden_width`
     are the first talk's values and are not tuned.
+
+    The last three fields exist for the cleanliness experiments, which
+    retrain the model one change at a time to see whether any training
+    choice makes the neurons cleaner. Their defaults are the talk's model:
+
+    - `activation`: `:relu`, or `:solu` for Anthropic's softmax linear
+      unit (see `solu/1`).
+    - `weight_decay`: shrinks every parameter a little each step, so the
+      model only keeps weights that earn their place.
+    - `activation_penalty`: adds this much of the neurons' total
+      activity to the loss, pushing each word to use fewer neurons.
     """
 
     defstruct vocabulary_size: 70,
@@ -53,7 +64,10 @@ defmodule Interpretability.Model do
               batch_size: 128,
               steps: 8_000,
               training_corpus_size: 60_000,
-              evaluation_corpus_size: 2_000
+              evaluation_corpus_size: 2_000,
+              activation: :relu,
+              weight_decay: 0.0,
+              activation_penalty: 0.0
 
     @type t :: %__MODULE__{}
   end
@@ -93,13 +107,15 @@ defmodule Interpretability.Model do
         {Map.put(params, name, tensor), key}
       end)
 
-    Map.merge(random, %{
+    random
+    |> Map.merge(%{
       gain1: Nx.broadcast(Nx.tensor(1.0, type: :f32), {d_model}),
       gain2: Nx.broadcast(Nx.tensor(1.0, type: :f32), {d_model}),
       gain3: Nx.broadcast(Nx.tensor(1.0, type: :f32), {d_model}),
       bias1: Nx.broadcast(Nx.tensor(0.0, type: :f32), {hidden_width}),
       bias2: Nx.broadcast(Nx.tensor(0.0, type: :f32), {d_model})
     })
+    |> Map.merge(activation_params(config))
   end
 
   @doc """
@@ -129,6 +145,34 @@ defmodule Interpretability.Model do
   end
 
   @doc """
+  The loss training minimizes: `loss/3` plus `:activation_penalty` times
+  the mean total activity (sum of absolute values) of the neurons at each
+  real position. With no penalty it is `loss/3`.
+  """
+  defn training_loss(params, batch, opts \\ []) do
+    opts = keyword!(opts, activation_penalty: 0.0)
+    {logits, hidden} = run(params, batch.tokens, &Function.identity/1)
+
+    loss_from(log_softmax(logits), batch) +
+      activity(hidden, batch.mask, opts[:activation_penalty])
+  end
+
+  @doc """
+  The softmax linear unit from Anthropic's "Softmax Linear Units" (2022):
+  each input times its softmax across the layer, `x · softmax(x)`.
+
+  Softmax makes the neurons compete. One large input takes almost all of
+  the softmax and passes through nearly unchanged, while the rest are
+  squashed toward zero, so a word ends up lighting few neurons. The
+  authors found this made more neurons interpretable. In the model the
+  unit is followed by a normalization with its own gain, as in the paper,
+  because squashing otherwise shrinks the whole layer.
+  """
+  defn solu(tensor) do
+    tensor * softmax(tensor)
+  end
+
+  @doc """
   `loss/3` over a whole dataset, compiled with `Interpretability.Compiler`.
   """
   @spec evaluate_loss(params(), Dataset.t(), keyword()) :: Nx.Tensor.t()
@@ -145,9 +189,10 @@ defmodule Interpretability.Model do
     Trainer.run(
       init(config),
       Dataset.batches(dataset, config.batch_size, config.seed),
-      &loss/2,
+      &training_loss(&1, &2, activation_penalty: config.activation_penalty),
       steps: config.steps,
-      learning_rate: config.learning_rate
+      learning_rate: config.learning_rate,
+      weight_decay: config.weight_decay
     )
   end
 
@@ -214,11 +259,44 @@ defmodule Interpretability.Model do
       embedded + attention(params, rmsnorm(embedded, params.gain1))
 
     normalized = rmsnorm(residual, params.gain2)
-    hidden = edit_hidden.(Nx.max(Nx.dot(normalized, params.weight1) + params.bias1, 0))
-    output = residual + Nx.dot(hidden, params.weight2) + params.bias2
+    hidden = edit_hidden.(activate(params, Nx.dot(normalized, params.weight1) + params.bias1))
+    output = residual + Nx.dot(after_activation(params, hidden), params.weight2) + params.bias2
     logits = Nx.dot(rmsnorm(output, params.gain3), params.projection)
     {logits, hidden}
   end
+
+  # A SoLU model is recognized by the gain on its neurons, so every caller
+  # of `forward/3` and `hidden/2` handles both kinds without an option.
+  deftransformp activate(params, preactivation) do
+    if Map.has_key?(params, :gain_hidden),
+      do: solu(preactivation),
+      else: Nx.max(preactivation, 0)
+  end
+
+  deftransformp after_activation(params, hidden) do
+    if Map.has_key?(params, :gain_hidden),
+      do: rmsnorm(hidden, params.gain_hidden),
+      else: hidden
+  end
+
+  deftransformp activity(hidden, mask, penalty) do
+    if penalty == 0.0 do
+      0.0
+    else
+      total = Nx.sum(Nx.abs(hidden), axes: [2])
+
+      total
+      |> Nx.multiply(mask)
+      |> Nx.sum()
+      |> Nx.divide(Nx.sum(mask))
+      |> Nx.multiply(penalty)
+    end
+  end
+
+  defp activation_params(%Config{activation: :relu}), do: %{}
+
+  defp activation_params(%Config{activation: :solu, hidden_width: hidden_width}),
+    do: %{gain_hidden: Nx.broadcast(Nx.tensor(1.0, type: :f32), {hidden_width})}
 
   # One causal head: each position mixes in the values of itself and the
   # positions before it, weighted by how well its query matches their keys.
