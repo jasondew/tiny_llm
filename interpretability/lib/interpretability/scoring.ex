@@ -42,6 +42,14 @@ defmodule Interpretability.Scoring do
           f1: float()
         }
 
+  @type combination :: %{
+          unit: non_neg_integer(),
+          labels: [label()],
+          precision: float(),
+          recall: float(),
+          f1: float()
+        }
+
   @type score :: %{
           unit: non_neg_integer(),
           firing_rate: float(),
@@ -175,6 +183,95 @@ defmodule Interpretability.Scoring do
   end
 
   @doc """
+  For every unit, its most precise label: the one it is most often right
+  about when it fires, among labels it catches at least `:min_recall` of
+  (default 0.1). `nil` when no label qualifies.
+
+  This is closer to how Goodfire judges a neuron, by whether its firings
+  are about one thing, without asking it to catch every instance of that
+  thing. Labels true on more than `:max_base_rate` of tokens (default
+  0.5) are left out, since firing on a few tokens of a label that is true
+  almost everywhere is precise by accident. Takes the options of
+  `score/3` too.
+  """
+  @spec precise(Nx.Tensor.t(), [map()], keyword()) :: [grade() | nil]
+  def precise(activations, labels, options \\ []) do
+    %{grades: grades, label_rates: label_rates} = grade_table(activations, labels, options)
+    min_recall = Keyword.get(options, :min_recall, 0.1)
+    max_base_rate = Keyword.get(options, :max_base_rate, 0.5)
+
+    Enum.map(grades, fn unit_grades ->
+      unit_grades
+      |> Enum.filter(&(&1.recall >= min_recall and label_rates[&1.label] <= max_base_rate))
+      |> Enum.max_by(&{&1.precision, &1.recall}, fn -> nil end)
+    end)
+  end
+
+  @doc """
+  For every unit, the best pair of labels from different keys, graded as
+  one label that is true where both are: `part_of_speech = :noun` and
+  `word_number = :plural` together make "plural noun".
+
+  A unit can have one job that no single label names, because the job is
+  two labels at once. Without this check such a unit would look mixed.
+
+  Every pair is tallied at once, `:chunk_size` units at a time (default
+  16) to bound memory. Takes the options of `score/3` too.
+  """
+  @spec combined(Nx.Tensor.t(), [map()], keyword()) :: [combination()]
+  def combined(activations, labels, options \\ []) do
+    threshold_fraction = Keyword.get(options, :threshold_fraction, 0.2)
+    chunk_size = Keyword.get(options, :chunk_size, 16)
+    {label_names, label_matrix} = label_matrix(indicators(labels))
+    names = List.to_tuple(label_names)
+    label_count = tuple_size(names)
+
+    pairs =
+      for first <- 0..(label_count - 1)//1,
+          second <- (first + 1)..(label_count - 1)//1,
+          elem(elem(names, first), 0) != elem(elem(names, second), 0),
+          do: {first, second}
+
+    pair_index =
+      Nx.tensor(Enum.map(pairs, fn {first, second} -> first * label_count + second end))
+
+    pair_counts =
+      Nx.Defn.jit(&pair_counts/2, Compiler.options()).(label_matrix, pair_index)
+
+    fires =
+      Nx.Defn.jit(&fires(&1, threshold_fraction: threshold_fraction), Compiler.options()).(
+        activations
+      )
+
+    {_token_count, unit_count} = Nx.shape(activations)
+    tally = Nx.Defn.jit(&pair_tallies/4, Compiler.options())
+    pair_tuple = List.to_tuple(pairs)
+    pair_count_tuple = pair_counts |> counts() |> List.to_tuple()
+
+    0..(unit_count - 1)//chunk_size
+    |> Enum.flat_map(fn start ->
+      stop = min(start + chunk_size, unit_count) - 1
+      fires_chunk = fires[[.., start..stop]]
+
+      {best, true_positives, fire_counts} =
+        tally.(fires_chunk, label_matrix, pair_index, pair_counts)
+
+      [counts(best), counts(true_positives), counts(fire_counts)]
+      |> Enum.zip_with(fn [pair, true_positive_count, fire_count] ->
+        {first, second} = elem(pair_tuple, pair)
+        combined_labels = [elem(names, first), elem(names, second)]
+
+        combined_labels
+        |> grade(true_positive_count, fire_count, elem(pair_count_tuple, pair))
+        |> Map.delete(:label)
+        |> Map.put(:labels, combined_labels)
+      end)
+    end)
+    |> Enum.with_index()
+    |> Enum.map(fn {combination, unit} -> Map.put(combination, :unit, unit) end)
+  end
+
+  @doc """
   Whether a unit's best label reaches `threshold` on both precision and
   recall.
   """
@@ -254,14 +351,47 @@ defmodule Interpretability.Scoring do
   # of those carry each label. With 512 features and about 200 labels over
   # 15,000 tokens, this is billions of multiply adds.
   defnp tallies(activations, label_matrix, opts \\ []) do
-    maximum = Nx.reduce_max(activations, axes: [0], keep_axes: true)
-
-    fires =
-      (activations > maximum * opts[:threshold_fraction] and maximum > 0)
-      |> Nx.as_type(:f32)
+    fires = fires(activations, opts)
 
     {Nx.dot(fires, [0], label_matrix, [0]), Nx.sum(fires, axes: [0]),
      Nx.sum(label_matrix, axes: [0])}
+  end
+
+  defnp fires(activations, opts \\ []) do
+    maximum = Nx.reduce_max(activations, axes: [0], keep_axes: true)
+
+    (activations > maximum * opts[:threshold_fraction] and maximum > 0)
+    |> Nx.as_type(:f32)
+  end
+
+  defnp pair_counts(label_matrix, pair_index) do
+    label_matrix
+    |> Nx.dot([0], label_matrix, [0])
+    |> Nx.flatten()
+    |> Nx.take(pair_index)
+  end
+
+  # For each unit in the chunk, the pair with the best F1, how many of the
+  # unit's firings carry both labels, and how often the unit fires. The
+  # tokens × (units · labels) product is why units go a chunk at a time.
+  defnp pair_tallies(fires, label_matrix, pair_index, pair_counts) do
+    {token_count, unit_count} = Nx.shape(fires)
+    label_count = Nx.axis_size(label_matrix, 1)
+
+    true_positives =
+      (Nx.new_axis(fires, 2) * Nx.new_axis(label_matrix, 1))
+      |> Nx.reshape({token_count, unit_count * label_count})
+      |> Nx.dot([0], label_matrix, [0])
+      |> Nx.reshape({unit_count, label_count * label_count})
+      |> Nx.take(pair_index, axis: 1)
+
+    fire_counts = Nx.sum(fires, axes: [0])
+    f1 = 2 * true_positives / Nx.max(Nx.new_axis(fire_counts, 1) + pair_counts, 1)
+    best = Nx.argmax(f1, axis: 1)
+
+    {best,
+     Nx.take_along_axis(true_positives, Nx.new_axis(best, 1), axis: 1) |> Nx.squeeze(axes: [1]),
+     fire_counts}
   end
 
   defp label_matrix(indicators) do

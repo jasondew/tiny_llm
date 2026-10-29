@@ -12,7 +12,7 @@ defmodule Interpretability.CleanlinessTest do
 
     assert baseline.name == "baseline"
     assert Cleanliness.config(baseline) == %Model.Config{}
-    assert Enum.all?(others, &(length(&1.changes) == 1))
+    assert Enum.all?(others, &(length(Keyword.delete(&1.changes, :seed)) <= 1))
     assert Enum.uniq_by(others, & &1.name) == others
   end
 
@@ -28,12 +28,13 @@ defmodule Interpretability.CleanlinessTest do
 
     for bar <- [0.8, 0.9] do
       kinds = result.kinds[bar]
-      assert kinds.clean + kinds.coarse + kinds.mixed + kinds.dead == 16
+      assert kinds.clean + kinds.coarse + kinds.combined + kinds.mixed + kinds.dead == 16
     end
 
     assert Map.keys(result.rubric) ==
              for(threshold <- [0.1, 0.2, 0.3, 0.5], bar <- [0.8, 0.9], do: {threshold, bar})
 
+    assert result.precise in 0..16
     assert result.probe_accuracy >= 0.0 and result.probe_accuracy <= 1.0
     assert is_float(result.evaluation_loss)
   end

@@ -16,11 +16,17 @@ defmodule Interpretability.Cleanliness do
   - **Is the model still good?** Evaluation loss and agreement probe
     accuracy. A change that cleans the neurons by breaking the model
     does not count.
-  - **How clean are the neurons?** Each neuron is one of four kinds:
+  - **How clean are the neurons?** Each neuron is one of five kinds:
     *clean* (one label matches it, precision and recall at the bar),
     *coarse* (no single label does, but a family of one label's values
-    does, see `Interpretability.Scoring.coarse/3`), *mixed* (neither), or
-    *dead* (never fires).
+    does, see `Interpretability.Scoring.coarse/3`), *combined* (two labels
+    together do, such as "plural noun", see
+    `Interpretability.Scoring.combined/3`), *mixed* (none of these), or
+    *dead* (never fires). The first match in that order wins.
+  - **How many are precise?** Neurons right at least 90% of the time
+    when they fire, whether or not they catch every instance, which is
+    closer to how Goodfire judges neurons. See
+    `Interpretability.Scoring.precise/3`.
   - **How much does the rubric matter?** The clean count at every pairing
     of firing threshold and bar, since Goodfire stresses that "clean"
     depends on where the lines are drawn.
@@ -40,6 +46,7 @@ defmodule Interpretability.Cleanliness do
   @type kinds :: %{
           clean: non_neg_integer(),
           coarse: non_neg_integer(),
+          combined: non_neg_integer(),
           mixed: non_neg_integer(),
           dead: non_neg_integer()
         }
@@ -49,6 +56,7 @@ defmodule Interpretability.Cleanliness do
           probe_accuracy: float(),
           mismatch_accuracy: float(),
           neuron_count: pos_integer(),
+          precise: non_neg_integer(),
           kinds: %{float() => kinds()},
           rubric: %{{float(), float()} => non_neg_integer()},
           median_f1: float(),
@@ -69,6 +77,8 @@ defmodule Interpretability.Cleanliness do
       %{name: "seed 1236", changes: [seed: 1236]},
       %{name: "weight decay 0.01", changes: [weight_decay: 0.01]},
       %{name: "weight decay 0.1", changes: [weight_decay: 0.1]},
+      %{name: "weight decay 0.1, seed 1235", changes: [weight_decay: 0.1, seed: 1235]},
+      %{name: "weight decay 0.1, seed 1236", changes: [weight_decay: 0.1, seed: 1236]},
       %{name: "activity penalty 0.001", changes: [activation_penalty: 1.0e-3]},
       %{name: "activity penalty 0.01", changes: [activation_penalty: 1.0e-2]},
       %{name: "SoLU", changes: [activation: :solu]},
@@ -91,13 +101,16 @@ defmodule Interpretability.Cleanliness do
     {_token_count, neuron_count} = Nx.shape(activations.hidden)
     scores = Scoring.score(activations.hidden, activations.labels)
     families = Scoring.coarse(activations.hidden, activations.labels)
+    combinations = Scoring.combined(activations.hidden, activations.labels)
+    precise = Scoring.precise(activations.hidden, activations.labels)
     live = Enum.reject(scores, &(&1.firing_rate == 0.0))
     live_units = MapSet.new(live, & &1.unit)
 
     %{
       evaluation_loss: Nx.to_number(Model.evaluate_loss(params, evaluation)),
       neuron_count: neuron_count,
-      kinds: Map.new(@bars, &{&1, kinds(scores, families, &1)}),
+      precise: Enum.count(precise, &(&1 != nil and &1.precision >= 0.9)),
+      kinds: Map.new(@bars, &{&1, kinds(scores, families, combinations, &1)}),
       rubric: rubric(activations),
       median_f1: median(Enum.map(live, & &1.best.f1)),
       median_family_f1:
@@ -111,22 +124,25 @@ defmodule Interpretability.Cleanliness do
 
   ## PRIVATE FUNCTIONS
 
-  defp kinds(scores, families, bar) do
-    [scores, families]
-    |> Enum.zip_with(fn [score, family] -> kind(score, family, bar) end)
+  defp kinds(scores, families, combinations, bar) do
+    [scores, families, combinations]
+    |> Enum.zip_with(fn [score, family, combination] -> kind(score, family, combination, bar) end)
     |> Enum.frequencies()
-    |> then(&Map.merge(%{clean: 0, coarse: 0, mixed: 0, dead: 0}, &1))
+    |> then(&Map.merge(%{clean: 0, coarse: 0, combined: 0, mixed: 0, dead: 0}, &1))
   end
 
-  defp kind(%{firing_rate: rate}, _family, _bar) when rate == 0.0, do: :dead
+  defp kind(%{firing_rate: rate}, _family, _combination, _bar) when rate == 0.0, do: :dead
 
-  defp kind(score, family, bar) do
+  defp kind(score, family, combination, bar) do
     cond do
       Scoring.monosemantic?(score, bar) -> :clean
-      family.precision >= bar and family.recall >= bar -> :coarse
+      meets?(family, bar) -> :coarse
+      meets?(combination, bar) -> :combined
       true -> :mixed
     end
   end
+
+  defp meets?(grade, bar), do: grade.precision >= bar and grade.recall >= bar
 
   defp rubric(activations) do
     for threshold <- @thresholds, into: %{} do

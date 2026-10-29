@@ -76,7 +76,7 @@ defmodule Mix.Tasks.Interp.Cleanliness do
 
   defp print_model_table(results) do
     info("\nIs the model still good?")
-    info(row(["variant", "eval loss", "probes", "mismatch probes"]))
+    info(row(["variant", "eval loss", "probes", "mismatched", "median F1", "family F1"]))
 
     for {variant, result} <- results do
       info(
@@ -84,18 +84,21 @@ defmodule Mix.Tasks.Interp.Cleanliness do
           variant.name,
           format(result.evaluation_loss, 4),
           format(result.probe_accuracy, 4),
-          format(result.mismatch_accuracy, 4)
+          format(result.mismatch_accuracy, 4),
+          format(result.median_f1, 2),
+          format(result.median_family_f1, 2)
         ])
       )
     end
   end
 
   defp print_kind_table(results, bar) do
-    info("\nWhat kind is each neuron? (precision and recall at #{bar})")
-
     info(
-      row(["variant", "neurons", "clean", "coarse", "mixed", "dead", "median F1", "family F1"])
+      "\nWhat kind is each neuron? (precision and recall at #{bar}; " <>
+        "precise: precision 0.9 at recall 0.1 or more)"
     )
+
+    info(row(["variant", "neurons", "clean", "coarse", "combined", "mixed", "dead", "precise"]))
 
     for {variant, result} <- results do
       kinds = result.kinds[bar]
@@ -106,10 +109,10 @@ defmodule Mix.Tasks.Interp.Cleanliness do
           Integer.to_string(result.neuron_count),
           percent(kinds.clean, result.neuron_count),
           percent(kinds.coarse, result.neuron_count),
+          percent(kinds.combined, result.neuron_count),
           percent(kinds.mixed, result.neuron_count),
           percent(kinds.dead, result.neuron_count),
-          format(result.median_f1, 2),
-          format(result.median_family_f1, 2)
+          percent(result.precise, result.neuron_count)
         ])
       )
     end
@@ -127,7 +130,7 @@ defmodule Mix.Tasks.Interp.Cleanliness do
   end
 
   defp row([name | cells]),
-    do: String.pad_trailing(name, 24) <> Enum.map_join(cells, &String.pad_leading(&1, 11))
+    do: String.pad_trailing(name, 30) <> Enum.map_join(cells, &String.pad_leading(&1, 12))
 
   defp percent(count, total), do: "#{count} (#{format(100 * count / total, 0)}%)"
 
