@@ -33,6 +33,15 @@ defmodule Interpretability.Scoring do
 
   @type grade :: %{label: label(), precision: float(), recall: float(), f1: float()}
 
+  @type family :: %{
+          unit: non_neg_integer(),
+          key: atom(),
+          values: [term()],
+          precision: float(),
+          recall: float(),
+          f1: float()
+        }
+
   @type score :: %{
           unit: non_neg_integer(),
           firing_rate: float(),
@@ -120,6 +129,52 @@ defmodule Interpretability.Scoring do
   end
 
   @doc """
+  For every unit, the best *family* of labels: one label key and a set of
+  its values, such as `part_of_speech` in `[:noun, :verb]`, graded as if
+  the family were a single label that is true when any of its values is.
+
+  This separates two kinds of messy unit. A *coarse* unit does one broad
+  job, firing on every noun and every verb: no single label matches it,
+  but a family does. A *mixed* unit does unrelated jobs, and no family
+  matches it either. Goodfire's "Neural Networks Are Already Clean"
+  argues that a layer with too few neurons makes them coarse, not mixed.
+
+  Families never use the `word` key, because any set of words is a
+  family of words: a unit firing on "llama" and "happy" would count as
+  coarse, which is exactly the mixing this is meant to catch.
+
+  For each key, values are added in order of how often the unit fires on
+  them, and the best prefix by F1 is kept. Ties go to the smaller family.
+  Takes the same options as `score/3`.
+  """
+  @spec coarse(Nx.Tensor.t(), [map()], keyword()) :: [family()]
+  def coarse(activations, labels, options \\ []) do
+    %{label_names: label_names, true_positives: true_positives, label_counts: label_counts} =
+      table = grade_table(activations, labels, options)
+
+    families =
+      [label_names, label_counts]
+      |> Enum.zip()
+      |> Enum.with_index()
+      |> Enum.reject(fn {{{key, _value}, _count}, _index} -> key == :word end)
+      |> Enum.group_by(fn {{{key, _value}, _count}, _index} -> key end)
+
+    [true_positives, table.fire_counts]
+    |> Enum.zip()
+    |> Enum.with_index()
+    |> Enum.map(fn {{unit_true_positives, fire_count}, unit} ->
+      unit_true_positives = List.to_tuple(unit_true_positives)
+
+      families
+      |> Enum.flat_map(fn {key, members} ->
+        prefixes(key, members, unit_true_positives, fire_count)
+      end)
+      |> Enum.max_by(&{&1.f1, -length(&1.values)})
+      |> Map.put(:unit, unit)
+    end)
+  end
+
+  @doc """
   Whether a unit's best label reaches `threshold` on both precision and
   recall.
   """
@@ -163,7 +218,36 @@ defmodule Interpretability.Scoring do
       |> Enum.zip()
       |> Map.new(fn {label, count} -> {label, count / token_count} end)
 
-    %{grades: grades, fire_counts: fire_counts, label_rates: label_rates}
+    %{
+      grades: grades,
+      fire_counts: fire_counts,
+      label_rates: label_rates,
+      label_names: label_names,
+      label_counts: label_counts,
+      true_positives: true_positives
+    }
+  end
+
+  # Every growing family for one key: the values the unit fires on most
+  # often first, then the next, and so on.
+  defp prefixes(key, members, unit_true_positives, fire_count) do
+    members
+    |> Enum.map(fn {{{_key, value}, label_count}, index} ->
+      {value, elem(unit_true_positives, index), label_count}
+    end)
+    |> Enum.sort_by(fn {_value, true_positive_count, label_count} ->
+      -ratio(true_positive_count, label_count)
+    end)
+    |> Enum.scan({[], 0, 0}, fn {value, true_positive_count, label_count},
+                                {values, true_positive_total, label_total} ->
+      {[value | values], true_positive_total + true_positive_count, label_total + label_count}
+    end)
+    |> Enum.map(fn {values, true_positive_total, label_total} ->
+      {key, values}
+      |> grade(true_positive_total, fire_count, label_total)
+      |> Map.delete(:label)
+      |> Map.merge(%{key: key, values: Enum.sort(values)})
+    end)
   end
 
   # The heavy part, compiled: which tokens each unit fires on, and how many

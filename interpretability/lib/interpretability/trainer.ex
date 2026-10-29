@@ -33,6 +33,8 @@ defmodule Interpretability.Trainer do
 
   - `:steps` (required): how many batches to train on.
   - `:learning_rate` (required): Adam's step size.
+  - `:weight_decay`: how strongly to shrink every parameter toward zero
+    each step (AdamW). Defaults to 0, plain Adam.
   - `:log_every`: how often to record the loss. Defaults to 100.
   - `:after_step`: a function applied to the parameters after every
     update, for constraints such as unit length decoder rows. Defaults to
@@ -48,7 +50,7 @@ defmodule Interpretability.Trainer do
     after_step = Keyword.get(options, :after_step, & &1)
 
     {init_optimizer, update_optimizer} =
-      Polaris.Optimizers.adam(learning_rate: Keyword.fetch!(options, :learning_rate))
+      optimizer(Keyword.fetch!(options, :learning_rate), Keyword.get(options, :weight_decay, 0.0))
 
     step =
       Nx.Defn.jit(
@@ -79,4 +81,12 @@ defmodule Interpretability.Trainer do
 
     {params, Enum.reverse(history)}
   end
+
+  ## PRIVATE FUNCTIONS
+
+  defp optimizer(learning_rate, weight_decay) when weight_decay == 0,
+    do: Polaris.Optimizers.adam(learning_rate: learning_rate)
+
+  defp optimizer(learning_rate, weight_decay),
+    do: Polaris.Optimizers.adamw(learning_rate: learning_rate, decay: weight_decay)
 end

@@ -93,6 +93,42 @@ defmodule Interpretability.ScoringTest do
     assert Scoring.monosemantic?(%{best: %{precision: 0.85, recall: 0.85}}, 0.8)
   end
 
+  describe "coarse/3" do
+    # Six tokens: llama, sees, happy, dogs, chases, calm.
+    @mixed_labels [
+      %{word: "llama", part_of_speech: :noun, word_number: :singular},
+      %{word: "sees", part_of_speech: :verb, word_number: :singular},
+      %{word: "happy", part_of_speech: :adjective, word_number: :singular},
+      %{word: "dogs", part_of_speech: :noun, word_number: :plural},
+      %{word: "chases", part_of_speech: :verb, word_number: :singular},
+      %{word: "calm", part_of_speech: :adjective, word_number: nil}
+    ]
+
+    test "a unit for nouns and verbs is coarse: one family, two values" do
+      [single] = Scoring.score(column([1.0, 1.0, 0.0, 1.0, 1.0, 0.0]), @mixed_labels)
+      [coarse] = Scoring.coarse(column([1.0, 1.0, 0.0, 1.0, 1.0, 0.0]), @mixed_labels)
+
+      assert single.best.f1 < 0.9
+      assert coarse.key == :part_of_speech
+      assert coarse.values == [:noun, :verb]
+      assert coarse.precision == 1.0
+      assert coarse.recall == 1.0
+    end
+
+    test "unrelated words do not make a family" do
+      [coarse] = Scoring.coarse(column([1.0, 0.0, 1.0, 0.0, 0.0, 0.0]), @mixed_labels)
+
+      assert coarse.key != :word
+      assert coarse.f1 < 0.9
+    end
+
+    test "a unit that never fires has an empty family" do
+      [coarse] = Scoring.coarse(column([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]), @mixed_labels)
+
+      assert coarse.f1 == 0.0
+    end
+  end
+
   ## PRIVATE FUNCTIONS
 
   defp column(values), do: Nx.reshape(Nx.tensor(values), {length(values), 1})

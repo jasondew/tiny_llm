@@ -43,4 +43,17 @@ defmodule Interpretability.TrainerTest do
 
     assert Nx.to_number(params.intercept) == 0.0
   end
+
+  test "weight decay shrinks parameters the loss does not care about", %{batches: batches} do
+    params = %{slope: Nx.tensor(0.0), intercept: Nx.tensor(0.0), unused: Nx.tensor(2.0)}
+    options = [steps: 100, learning_rate: 0.05]
+
+    {plain, _history} = Trainer.run(params, batches, &line_loss/2, options)
+
+    {decayed, _history} =
+      Trainer.run(params, batches, &line_loss/2, [weight_decay: 0.5] ++ options)
+
+    assert Nx.to_number(plain.unused) == 2.0
+    assert Nx.to_number(decayed.unused) < 1.0
+  end
 end
