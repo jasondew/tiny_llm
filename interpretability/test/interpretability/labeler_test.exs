@@ -14,7 +14,8 @@ defmodule Interpretability.LabelerTest do
     :depth,
     :tense,
     :animacy,
-    :after_main_verb
+    :after_main_verb,
+    :can_end
   ]
 
   describe "the llama who chases the dogs flees ." do
@@ -39,6 +40,11 @@ defmodule Interpretability.LabelerTest do
 
       assert column(tokens, :after_main_verb) ==
                [false, false, false, false, false, false, true, true]
+    end
+
+    test "the sentence could end only after the main verb", %{tokens: tokens} do
+      assert column(tokens, :can_end) ==
+               [false, false, false, false, false, false, true, false]
     end
 
     test "parts of speech, numbers, tense and animacy", %{tokens: tokens} do
@@ -71,6 +77,31 @@ defmodule Interpretability.LabelerTest do
 
     assert Enum.at(tokens, 4).labels.role == :object
     assert Enum.at(tokens, 6).labels.depth == 1
+
+    # "the fox sees the dogs" is already a sentence; "the fox sees the" is not.
+    assert column(tokens, :can_end) == [false, false, false, false, true, false, true, false]
+  end
+
+  test "a copula's adjective can end the sentence, an adjective before a noun cannot" do
+    tree = %{
+      subject: %{
+        type: :simple,
+        determiner: "the",
+        adjectives: ["big"],
+        noun: "rock",
+        number: :singular,
+        animacy: :inanimate
+      },
+      verb_phrase: %{
+        type: :copula,
+        verb: "is",
+        tense: :present,
+        number: :singular,
+        adjective: "wet"
+      }
+    }
+
+    assert column(Labeler.label(tree), :can_end) == [false, false, false, false, true, false]
   end
 
   test "past tense verbs carry no number" do
@@ -90,11 +121,12 @@ defmodule Interpretability.LabelerTest do
              depth: 0,
              tense: nil,
              animacy: nil,
-             after_main_verb: false
+             after_main_verb: false,
+             can_end: false
            }
   end
 
-  test "every token of every generated sentence carries exactly the nine labels" do
+  test "every token of every generated sentence carries exactly the ten labels" do
     Grammar.seed(5)
 
     for tree <- Grammar.trees(2_000) do

@@ -82,3 +82,10 @@ raw ReLU neuron is above zero on many tokens, often only slightly, so
 "above zero" would make neurons look messier than they are and rig the
 comparison in the SAE's favour. Monosemantic means precision and recall
 both at least 0.9 for the unit's best label (highest F1).
+
+## A tenth label: can_end
+
+Added after the first neuron report showed neuron 64 firing on the last
+word of finished sentences. True when no clause is still waiting for its
+verb and the word finishes a phrase: a noun, a pronoun, an intransitive
+verb, or a copula's adjective. Left context only, like every other label.

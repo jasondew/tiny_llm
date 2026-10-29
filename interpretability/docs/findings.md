@@ -145,3 +145,28 @@ missing at least one concept the model clearly uses: "a sentence could
 end here". It is computable from left context. Adding it would make the
 answer key more complete; leaving it out is a good honest Q&A answer
 ("our labels are only the concepts we thought of").
+
+## Adding the missing label (2026-10-29)
+
+Prompted by Goodfire's "Neural Networks Are Already Clean" (2026), which
+argues that messy looking neurons usually mean a missing label, the labels
+gained `:can_end` ("the words so far already make a whole sentence") and
+the neurons were scored again.
+
+**Result.** Still **0 of 128** monosemantic. But `can_end` became the best
+label for **23 neurons**, more than any other single label value, so the
+model spends a large share of its neurons on a concept the answer key had
+missed. No one neuron owns it. The neurons split it into slices, each one
+precise but partial: neuron 124 is right 99% of the time it fires but
+catches 56% of the places a sentence could end; neuron 123 is right 95%
+of the time and catches 64%; neuron 104 catches 98% but is right only 71%
+of the time. Neuron 64, the one that prompted the label, is a narrow
+slice: precision 0.74, recall 0.15.
+
+**Explanation for the stage.** Both camps get something. Goodfire is
+right that the answer key was incomplete: a whole concept was missing,
+and the model cares about it a lot. But filling the gap did not make any
+neuron clean. Here the concept is spread across many neurons, each
+covering part of it, rather than packed into one. Whether the SAE can
+gather those slices back into a single clean feature is the head to head
+question.

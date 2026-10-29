@@ -28,6 +28,7 @@ defmodule Interpretability.Labeler do
   | `:tense` | `:present` or `:past`, on verbs |
   | `:animacy` | `:animate` or `:inanimate`, on nouns and pronouns |
   | `:after_main_verb` | whether the sentence's main verb has been read |
+  | `:can_end` | whether the words so far already make a whole sentence |
 
   ## Only the words so far
 
@@ -43,12 +44,18 @@ defmodule Interpretability.Labeler do
   clause goes on the stack when it opens and comes off when its verb is
   read. The label is the number on top of the stack, once that number is
   known.
+
+  `:can_end` is the same idea: the sentence could stop here when no clause
+  is still waiting for its verb and this word finishes a phrase (a noun, a
+  pronoun, an intransitive verb, or the adjective after `is`). It was
+  added after a neuron turned up that fires on exactly those words, a
+  concept the first nine labels did not have.
   """
 
   alias Interpretability.Grammar
   alias Interpretability.Vocab
 
-  @typedoc "The nine facts known about one token."
+  @typedoc "The ten facts known about one token."
   @type labels :: %{
           word: Vocab.word(),
           part_of_speech: atom(),
@@ -58,7 +65,8 @@ defmodule Interpretability.Labeler do
           depth: non_neg_integer(),
           tense: Vocab.tense() | nil,
           animacy: Vocab.animacy() | nil,
-          after_main_verb: boolean()
+          after_main_verb: boolean(),
+          can_end: boolean()
         }
 
   @type token :: %{word: Vocab.word(), labels: labels()}
@@ -93,7 +101,8 @@ defmodule Interpretability.Labeler do
       depth: 0,
       tense: nil,
       animacy: nil,
-      after_main_verb: false
+      after_main_verb: false,
+      can_end: false
     }
   end
 
@@ -162,7 +171,7 @@ defmodule Interpretability.Labeler do
         noun_phrase(state, object, %{context | role: :object}, :not_subject)
 
       %{type: :copula, adjective: adjective} ->
-        emit(state, adjective, :adjective, %{}, context)
+        emit(state, adjective, :adjective, %{}, context, true)
 
       %{type: :intransitive} ->
         state
@@ -177,7 +186,22 @@ defmodule Interpretability.Labeler do
 
   defp settle_subject(state, _number, _subject_of), do: state
 
-  defp emit(state, word, part_of_speech, extra, context) do
+  # `finishes_phrase` says whether this word completes a phrase, so that
+  # the sentence could stop after it. Nouns, pronouns and intransitive
+  # verbs do; a copula's adjective is passed in explicitly.
+  defp emit(
+         state,
+         word,
+         part_of_speech,
+         extra,
+         context,
+         finishes_phrase \\ nil
+       ) do
+    finishes_phrase =
+      if finishes_phrase == nil,
+        do: part_of_speech in [:noun, :pronoun, :intransitive_verb],
+        else: finishes_phrase
+
     labels =
       Map.merge(
         %{
@@ -189,7 +213,8 @@ defmodule Interpretability.Labeler do
           depth: context.depth,
           tense: nil,
           animacy: nil,
-          after_main_verb: state.after_main_verb
+          after_main_verb: state.after_main_verb,
+          can_end: finishes_phrase and state.stack == []
         },
         extra
       )
