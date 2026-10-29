@@ -73,3 +73,12 @@ it had seen too often. More sentences fixed it:
 CPU with EXLA. `d_model` and the MLP width were not touched. Probe
 accuracy is measured on a separate 20,000 sentence corpus (seed + 1),
 because the cold open case appears in only about one sentence in forty.
+
+## One firing rule for neurons and features
+
+A unit fires on a token when its activation exceeds 20% of that unit's
+maximum over the dataset. Neurons and SAE features use the same rule. A
+raw ReLU neuron is above zero on many tokens, often only slightly, so
+"above zero" would make neurons look messier than they are and rig the
+comparison in the SAE's favour. Monosemantic means precision and recall
+both at least 0.9 for the unit's best label (highest F1).
