@@ -74,6 +74,19 @@ defmodule Interpretability.ScoringTest do
     refute Map.has_key?(best, {:tense, nil})
   end
 
+  test "by_label can leave out labels true for most tokens" do
+    activations = Nx.tensor([[1.0], [1.0], [1.0], [1.0], [0.0], [0.0]])
+
+    labels =
+      Enum.map([true, true, true, true, false, true], &%{common: &1, rare: !&1})
+
+    assert Map.has_key?(Scoring.by_label(activations, labels), {:common, true})
+
+    best = Scoring.by_label(activations, labels, max_base_rate: 0.5)
+    refute Map.has_key?(best, {:common, true})
+    assert Map.has_key?(best, {:rare, true})
+  end
+
   test "monosemantic means both precision and recall reach the threshold" do
     assert Scoring.monosemantic?(%{best: %{precision: 0.95, recall: 0.9}})
     refute Scoring.monosemantic?(%{best: %{precision: 0.95, recall: 0.85}})

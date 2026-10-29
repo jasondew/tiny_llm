@@ -48,6 +48,15 @@ defmodule Interpretability.ModelTest do
     assert Nx.to_number(Model.evaluate_loss(params, dataset)) < 0.7 * initial
   end
 
+  test "no evaluation sentence also appears in training" do
+    config = %Config{training_corpus_size: 3_000, evaluation_corpus_size: 300}
+    {training, evaluation} = Model.datasets(config)
+    seen = MapSet.new(training.trees, &Grammar.words/1)
+
+    assert length(evaluation.trees) == 300
+    refute Enum.any?(evaluation.trees, &MapSet.member?(seen, Grammar.words(&1)))
+  end
+
   test "the predictor scores every word after a prefix", %{params: params} do
     scores = Model.predictor(params).(~w(the llama))
 

@@ -10,7 +10,8 @@ defmodule Mix.Tasks.Interp.Train do
   The training, evaluation and probe sentences all come from seeded
   grammar runs, so the same seed retrains the same model. Probe accuracy
   is measured on a separate 20,000 sentence corpus, because the cold open
-  case is rare: about one sentence in forty.
+  case is rare: about one sentence in forty. Probe sentences that also
+  appear in training are dropped, so every probe is new to the model.
 
   Writes `priv/checkpoints/model.etf` as `%{config, params, history}`.
   """
@@ -42,8 +43,14 @@ defmodule Mix.Tasks.Interp.Train do
     }
 
     {training, evaluation} = Model.datasets(config)
+    seen = Model.training_sentences(config)
     Grammar.seed(config.seed + 1)
-    probes = Enum.flat_map(Grammar.trees(@probe_corpus_size), &Probes.from_tree/1)
+
+    probes =
+      @probe_corpus_size
+      |> Grammar.trees()
+      |> Enum.reject(&MapSet.member?(seen, Grammar.words(&1)))
+      |> Enum.flat_map(&Probes.from_tree/1)
 
     {microseconds, {params, history}} = :timer.tc(fn -> Model.train(config, training) end)
     Checkpoint.save(%{config: config, params: params, history: history}, @path)

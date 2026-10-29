@@ -68,13 +68,14 @@ defmodule Mix.Tasks.Interp.Sae do
   end
 
   defp print_comparison(activations, features, scores) do
-    neuron_best = Scoring.by_label(activations.hidden, activations.labels)
-    feature_best = Scoring.by_label(features, activations.labels)
+    neuron_best = Scoring.by_label(activations.hidden, activations.labels, max_base_rate: 0.5)
+    feature_best = Scoring.by_label(features, activations.labels, max_base_rate: 0.5)
     neuron_scores = Scoring.score(activations.hidden, activations.labels)
 
     info(
       "\nMonosemantic at 0.9: #{count_clean(neuron_scores)} of 128 neurons, " <>
-        "#{count_clean(scores)} of #{length(scores)} features"
+        "#{count_clean(scores)} of #{length(scores)} features, " <>
+        "covering #{distinct_clean(scores)} distinct labels"
     )
 
     info("\nBest features:")
@@ -88,7 +89,10 @@ defmodule Mix.Tasks.Interp.Sae do
     feature_wins = Enum.count(labels, &(feature_best[&1].f1 - neuron_best[&1].f1 >= @margin))
     neuron_wins = Enum.count(labels, &(neuron_best[&1].f1 - feature_best[&1].f1 >= @margin))
 
-    info("\nHead to head over #{length(labels)} labels (a win needs #{@margin} more F1):")
+    info(
+      "\nHead to head over #{length(labels)} labels true for at most half of all words " <>
+        "(a win needs #{@margin} more F1):"
+    )
 
     info(
       "  features win #{feature_wins}, neurons win #{neuron_wins}, " <>
@@ -112,6 +116,10 @@ defmodule Mix.Tasks.Interp.Sae do
   end
 
   defp count_clean(scores), do: Enum.count(scores, &Scoring.monosemantic?/1)
+
+  defp distinct_clean(scores),
+    do:
+      scores |> Enum.filter(&Scoring.monosemantic?/1) |> Enum.uniq_by(& &1.best.label) |> length()
 
   defp mean_f1(best),
     do: best |> Map.values() |> Enum.map(& &1.f1) |> then(&(Enum.sum(&1) / length(&1)))

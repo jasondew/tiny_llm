@@ -13,12 +13,18 @@ defmodule Interpretability.ActivationsTest do
     %{dataset: dataset, params: params, activations: Activations.collect(params, dataset)}
   end
 
-  test "one row per real input position", %{dataset: dataset, activations: activations} do
-    real_positions = dataset.mask |> Nx.sum() |> Nx.to_number() |> round()
+  test "one row per real input position after <start>", %{
+    dataset: dataset,
+    activations: activations
+  } do
+    # <start> is the same vector in every sentence, so it is left out.
+    real_positions =
+      (dataset.mask |> Nx.sum() |> Nx.to_number() |> round()) - length(dataset.labels)
 
     assert Nx.shape(activations.hidden) == {real_positions, 128}
     assert length(activations.labels) == real_positions
     assert length(activations.contexts) == real_positions
+    refute Enum.any?(activations.labels, &(&1.part_of_speech == :start))
   end
 
   test "each row is the model's hidden layer at its context", %{

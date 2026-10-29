@@ -10,7 +10,10 @@ defmodule Interpretability.Activations do
   that table.
 
   Padding positions are left out, so every row is a word the model really
-  read.
+  read. So is position 0: it always holds `<start>`, and since attention
+  only looks backwards, the model computes exactly the same vector there
+  in every sentence. Keeping it would add one identical row per sentence,
+  enough to give the sparse autoencoder several features for one fact.
   """
 
   alias Interpretability.Compiler
@@ -32,8 +35,8 @@ defmodule Interpretability.Activations do
         }
 
   @doc """
-  The hidden layer at every real input position of `dataset`, in dataset
-  order: a tokens × 128 tensor, with each row's labels and its
+  The hidden layer at every real input position of `dataset` after
+  `<start>`, in dataset order: a tokens × 128 tensor, with each row's labels and its
   `{sentence_index, position}`.
   """
   @spec collect(Model.params(), Dataset.t()) :: t()
@@ -45,7 +48,7 @@ defmodule Interpretability.Activations do
       dataset.labels
       |> Enum.with_index()
       |> Enum.flat_map(fn {sentence_labels, sentence} ->
-        for position <- 0..(length(sentence_labels) - 1), do: {sentence, position}
+        for position <- 1..(length(sentence_labels) - 1), do: {sentence, position}
       end)
 
     rows =
@@ -60,7 +63,7 @@ defmodule Interpretability.Activations do
         |> Nx.reshape({sentence_count * context_length, width})
         |> Nx.take(rows)
         |> Nx.backend_copy(Nx.BinaryBackend),
-      labels: List.flatten(dataset.labels),
+      labels: Enum.flat_map(dataset.labels, &tl/1),
       contexts: contexts
     }
   end

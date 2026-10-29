@@ -155,13 +155,36 @@ defmodule Interpretability.Model do
   The training and evaluation datasets for `config`, drawn from the
   grammar in that order from the config's seed. Every task that needs
   "the" evaluation set gets the same sentences this way.
+
+  The grammar repeats short sentences often, so the evaluation set skips
+  any sentence that also appears in training. Every evaluation sentence
+  is one the model never saw.
   """
   @spec datasets(Config.t()) :: {Dataset.t(), Dataset.t()}
   def datasets(%Config{} = config) do
     Interpretability.Grammar.seed(config.seed)
-    training = Dataset.build(Interpretability.Grammar.trees(config.training_corpus_size))
-    evaluation = Dataset.build(Interpretability.Grammar.trees(config.evaluation_corpus_size))
-    {training, evaluation}
+    training_trees = Interpretability.Grammar.trees(config.training_corpus_size)
+    seen = MapSet.new(training_trees, &Interpretability.Grammar.words/1)
+
+    evaluation_trees =
+      Stream.repeatedly(&Interpretability.Grammar.tree/0)
+      |> Stream.reject(&MapSet.member?(seen, Interpretability.Grammar.words(&1)))
+      |> Enum.take(config.evaluation_corpus_size)
+
+    {Dataset.build(training_trees), Dataset.build(evaluation_trees)}
+  end
+
+  @doc """
+  Whether a sentence appears in the training set for `config`, for
+  holding probe sentences out too.
+  """
+  @spec training_sentences(Config.t()) :: MapSet.t()
+  def training_sentences(%Config{} = config) do
+    Interpretability.Grammar.seed(config.seed)
+
+    config.training_corpus_size
+    |> Interpretability.Grammar.trees()
+    |> MapSet.new(&Interpretability.Grammar.words/1)
   end
 
   @doc """

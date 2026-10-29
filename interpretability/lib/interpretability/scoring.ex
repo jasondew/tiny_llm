@@ -88,7 +88,11 @@ defmodule Interpretability.Scoring do
   (highest F1). This is how neurons and SAE features are compared head to
   head: for each concept, how clean is the best unit either side has?
 
-  Takes the same options as `score/3`.
+  Takes the same options as `score/3`, plus `:max_base_rate`: leave out
+  labels true for more than this share of tokens. A unit that fires on
+  every token already scores well on a label that is true almost
+  everywhere, so such labels say nothing about how clean a unit is, and a
+  sparse feature can never win them. Comparisons use 0.5.
   """
   @spec by_label(Nx.Tensor.t(), [map()], keyword()) :: %{
           label() => %{
@@ -99,13 +103,15 @@ defmodule Interpretability.Scoring do
           }
         }
   def by_label(activations, labels, options \\ []) do
-    %{grades: grades} = grade_table(activations, labels, options)
+    %{grades: grades, label_rates: label_rates} = grade_table(activations, labels, options)
+    max_base_rate = Keyword.get(options, :max_base_rate, 1.0)
 
     grades
     |> Enum.with_index()
     |> Enum.flat_map(fn {unit_grades, unit} ->
       Enum.map(unit_grades, &Map.put(&1, :unit, unit))
     end)
+    |> Enum.filter(&(label_rates[&1.label] <= max_base_rate))
     |> Enum.group_by(& &1.label)
     |> Map.new(fn {label, candidates} ->
       best = Enum.max_by(candidates, & &1.f1, fn -> nil end)
@@ -150,7 +156,14 @@ defmodule Interpretability.Scoring do
         end)
       end)
 
-    %{grades: grades, fire_counts: fire_counts}
+    {token_count, _unit_count} = Nx.shape(activations)
+
+    label_rates =
+      [label_names, label_counts]
+      |> Enum.zip()
+      |> Map.new(fn {label, count} -> {label, count / token_count} end)
+
+    %{grades: grades, fire_counts: fire_counts, label_rates: label_rates}
   end
 
   # The heavy part, compiled: which tokens each unit fires on, and how many
