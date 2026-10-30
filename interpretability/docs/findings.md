@@ -340,3 +340,58 @@ Limits: labels cover only what the grammar knows, so a neuron tracking
 something unlabeled (position, "a verb comes next") counts as mixed; the
 combined check tries pairs only; the non weight decay variants ran on one
 seed each.
+
+## Steering: which direction means "the subject is plural"? (2026-10-30)
+
+Five candidate directions in the 128 neuron space, each scaled to length
+one and pushed at multiples of the average neuron vector length at a word
+(15.75), at every word (`mix interp.steer`). Flip rate is the share of
+5,412 held out singular subject probes where the model switches to a
+plural verb. Damage is the rise in loss on words whose next word is not a
+verb. The cold open margin is the best plural verb's score minus the best
+singular verb's after `the llama who chases the dogs` (−5.02 unpushed).
+
+| Direction | Push for a full flip | Damage there | Cold open margin there | At push 1: flips, damage |
+| --- | --- | --- | --- | --- |
+| Mean difference (plural minus singular average) | 1 | 0.456 | 8.27 | 100%, 0.456 |
+| Best neuron (74: precision 0.78, recall 0.54) | 2 | **0.094** | 5.44 | 68%, −0.003 |
+| Best SAE feature (29 of 512: precision 0.99, recall 0.23) | 2 | 2.654 | 5.14 | 94%, 0.784 |
+| Sum of 17 SAE plural fragments | 4 | 3.057 | 3.20 | 8%, 0.523 |
+| Narrow SAE feature (28 of 64: precision 0.62, recall 0.33) | 2 | 0.228 | 3.57 | 50%, 0.030 |
+
+The speaker made no prediction.
+
+What it means:
+
+- **The messy neuron is the cleanest knob.** Neuron 74 is a mediocre
+  plural detector (wrong on 22% of its firings, missing 46% of plural
+  subjects), yet pushing it flips every probe for a tenth of a nat of
+  damage. Detecting a concept and controlling it are different tests,
+  and a unit can pass one and fail the other.
+- **The SAE's cleanest feature is the worst knob of the single
+  directions.** Feature 29 is right 99% of the time it fires, but pushing
+  it costs eight to thirty times the damage of the neuron for the same
+  flips. Its decoder row carries the context its fragment lives in, not
+  just "plural".
+- **Adding the fragments up makes it worse, not better.** The 17 plural
+  fragments summed need twice the push of any single direction and do
+  the most damage. Fragments of a split concept do not add back up to
+  the concept.
+- **The narrower SAE helps.** With 64 features its plural feature is a
+  worse detector (precision 0.62) but a far better knob than the 512
+  SAE's (0.228 against 2.654 damage for a full flip): less splitting, a
+  more general direction.
+- **The dumb average is a strong yardstick.** The mean difference flips
+  everything at the smallest push, with moderate damage. Only the neuron
+  and the narrow SAE beat it on damage.
+
+Caveat: equal length is not equal naturalness. Neuron 74 never exceeds
+8.94 on its own, and a full flip pushes it by 31.5, three and a half
+times its maximum. It stays cheap because in a one layer model a neuron
+only writes one fixed vector into the residual stream, and neuron 74's
+vector mostly moves verb number. One model, one seed.
+
+An earlier run selected 55 "fragments" by precision for plural alone,
+which swept in features about other things (such as the word `they`).
+Fragments are now features with plural among their top three labels,
+which gives the 17 counted before.

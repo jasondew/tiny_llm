@@ -183,6 +183,16 @@ defmodule Interpretability.Scoring do
   end
 
   @doc """
+  Every unit's grade on one label, in unit order. Takes the options of
+  `score/3`.
+  """
+  @spec grades(Nx.Tensor.t(), [map()], label(), keyword()) :: [grade()]
+  def grades(activations, labels, label, options \\ []) do
+    %{grades: grades} = grade_table(activations, labels, options)
+    Enum.map(grades, fn unit_grades -> Enum.find(unit_grades, &(&1.label == label)) end)
+  end
+
+  @doc """
   For every unit, its most precise label: the one it is most often right
   about when it fires, among labels it catches at least `:min_recall` of
   (default 0.1). `nil` when no label qualifies.

@@ -118,6 +118,20 @@ defmodule Interpretability.Probes do
     number
   end
 
+  @doc """
+  Every present tense verb with its number: the words whose number shows.
+  """
+  @spec present_verbs() :: [{Vocab.word(), Vocab.grammatical_number()}]
+  def present_verbs do
+    for number <- [:singular, :plural],
+        word <-
+          Vocab.transitive_verbs(:present, number) ++
+            Vocab.intransitive_verbs(:animate, :present, number) ++
+            Vocab.intransitive_verbs(:inanimate, :present, number) ++
+            Vocab.copula(:present, number),
+        do: {word, number}
+  end
+
   ## PRIVATE FUNCTIONS
 
   defp probe(tokens, position, number, category) do
@@ -157,14 +171,4 @@ defmodule Interpretability.Probes do
   defp main_category(:pronoun), do: :pronoun_subject
   defp main_category(:relative), do: :relative_distractor
   defp main_category(:prepositional), do: :prepositional_distractor
-
-  defp present_verbs do
-    for number <- [:singular, :plural],
-        word <-
-          Vocab.transitive_verbs(:present, number) ++
-            Vocab.intransitive_verbs(:animate, :present, number) ++
-            Vocab.intransitive_verbs(:inanimate, :present, number) ++
-            Vocab.copula(:present, number),
-        do: {word, number}
-  end
 end

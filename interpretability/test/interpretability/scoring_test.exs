@@ -129,6 +129,17 @@ defmodule Interpretability.ScoringTest do
     end
   end
 
+  test "grades/4 grades every unit on one label" do
+    activations =
+      Nx.tensor([[1.0, 1.0], [0.0, 1.0], [1.0, 0.0], [0.0, 1.0], [1.0, 0.0], [0.0, 1.0]])
+
+    [first, second] = Scoring.grades(activations, @labels, {:part_of_speech, :noun})
+
+    assert first.precision == 2 / 3
+    assert first.recall == 1.0
+    assert second.precision == 0.0
+  end
+
   describe "precise/3" do
     test "a unit precise on a rare label counts even with low recall" do
       # Ten tokens; "rare" is true on 4. The unit fires on one of them only.
