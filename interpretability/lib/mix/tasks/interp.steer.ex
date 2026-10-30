@@ -10,8 +10,8 @@ defmodule Mix.Tasks.Interp.Steer do
      minus where it is singular. No interpretability needed: the yardstick.
   2. **best neuron**: the neuron that best matches plural agreement.
   3. **best SAE feature**: the 512 feature SAE's best plural feature.
-  4. **SAE fragments**: every 512 SAE feature at least 90% precise for
-     plural agreement (and catching at least 1% of it), added together.
+  4. **SAE fragments**: every 512 SAE feature with plural agreement
+     among its top three labels at 90% precision or more, added together.
   5. **narrow SAE feature**: the best plural feature of a 64 feature SAE,
      which has less room to split the concept into fragments.
 
@@ -109,12 +109,17 @@ defmodule Mix.Tasks.Interp.Steer do
     best_feature = Scoring.by_label(features, activations.labels)[@plural]
     best_narrow = Scoring.by_label(narrow_features, activations.labels)[@plural]
 
+    # Features about plural agreement: it is among their top three labels
+    # and they are right about it at least 90% of the time. Features that
+    # are precise for plural only by accident, like the word "they", are
+    # left out, because pushing them pushes their real job too.
     fragments =
       features
-      |> Scoring.grades(activations.labels, @plural)
-      |> Enum.with_index()
-      |> Enum.filter(fn {grade, _feature} -> grade.precision >= 0.9 and grade.recall >= 0.01 end)
-      |> Enum.map(fn {_grade, feature} -> feature end)
+      |> Scoring.score(activations.labels)
+      |> Enum.filter(fn score ->
+        Enum.any?(score.top, &(&1.label == @plural and &1.precision >= 0.9))
+      end)
+      |> Enum.map(& &1.unit)
 
     [
       {"1 mean difference",
