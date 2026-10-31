@@ -1,9 +1,9 @@
 defmodule Mix.Tasks.Interp.Steer do
-  @shortdoc "Pushes five candidate plural directions and measures flips against damage"
+  @shortdoc "Pushes six candidate plural directions and measures flips against damage"
 
   @moduledoc """
   Which direction in the neurons best means "the subject is plural"?
-  Pushes five candidates at the same sizes and measures each with
+  Pushes six candidates at the same sizes and measures each with
   `Interpretability.Steering`:
 
   1. **mean difference**: average neurons where the subject is plural,
@@ -14,13 +14,18 @@ defmodule Mix.Tasks.Interp.Steer do
      among its top three labels at 90% precision or more, added together.
   5. **narrow SAE feature**: the best plural feature of a 64 feature SAE,
      which has less room to split the concept into fragments.
+  6. **end to end SAE feature**: the best plural feature of a 512
+     feature SAE trained to keep the model's predictions rather than
+     rebuild its neurons, see `Interpretability.SAE.train_end_to_end/3`.
 
       mix interp.steer
 
   Push sizes are multiples of the average length of the neuron vector at
   a word, so 1.0 is a push as large as everything the neurons normally
-  say. The 64 feature SAE is trained once and saved to
-  `priv/checkpoints/sae_64.etf`. Writes `priv/results/steering.etf`.
+  say. The 64 feature SAE and the end to end SAE are trained once and
+  saved to `priv/checkpoints/sae_64.etf` and
+  `priv/checkpoints/sae_end_to_end_512.etf`. Writes
+  `priv/results/steering.etf`.
   """
 
   use Mix.Task
@@ -37,6 +42,7 @@ defmodule Mix.Tasks.Interp.Steer do
   @model_path "priv/checkpoints/model.etf"
   @sae_path "priv/checkpoints/sae_512.etf"
   @narrow_sae_path "priv/checkpoints/sae_64.etf"
+  @end_to_end_sae_path "priv/checkpoints/sae_end_to_end_512.etf"
   @results_path "priv/results/steering.etf"
   @training_sentence_count 20_000
   @plural {:agreement_number, :plural}
@@ -51,7 +57,7 @@ defmodule Mix.Tasks.Interp.Steer do
     {training, evaluation} = Model.datasets(config)
     activations = Activations.collect(params, evaluation)
     probes = Probes.held_out(config)
-    directions = directions(params, training, activations)
+    directions = directions(params, training, evaluation, activations)
 
     word_length =
       activations.hidden
@@ -99,15 +105,20 @@ defmodule Mix.Tasks.Interp.Steer do
 
   ## PRIVATE FUNCTIONS
 
-  defp directions(params, training, activations) do
+  defp directions(params, training, evaluation, activations) do
     %{config: sae_config, sae: sae} = Checkpoint.load(@sae_path)
     narrow = narrow_sae(params, training)
+    end_to_end = end_to_end_sae(params, training, evaluation, activations)
     features = SAE.features(sae, activations.hidden, sae_config.active_count)
     narrow_features = SAE.features(narrow.sae, activations.hidden, narrow.config.active_count)
+
+    end_to_end_features =
+      SAE.features(end_to_end.sae, activations.hidden, end_to_end.config.active_count)
 
     best_neuron = Scoring.by_label(activations.hidden, activations.labels)[@plural]
     best_feature = Scoring.by_label(features, activations.labels)[@plural]
     best_narrow = Scoring.by_label(narrow_features, activations.labels)[@plural]
+    best_end_to_end = Scoring.by_label(end_to_end_features, activations.labels)[@plural]
 
     # Features about plural agreement: it is among their top three labels
     # and they are right about it at least 90% of the time. Features that
@@ -146,6 +157,11 @@ defmodule Mix.Tasks.Interp.Steer do
        %{
          direction: Steering.features(narrow.sae, [best_narrow.unit]),
          description: "feature #{best_narrow.unit} of 64, #{describe(best_narrow)}"
+       }},
+      {"6 end to end SAE feature",
+       %{
+         direction: Steering.features(end_to_end.sae, [best_end_to_end.unit]),
+         description: "feature #{best_end_to_end.unit} of 512, #{describe(best_end_to_end)}"
        }}
     ]
   end
@@ -167,6 +183,37 @@ defmodule Mix.Tasks.Interp.Steer do
       Checkpoint.save(narrow, @narrow_sae_path)
       narrow
     end
+  end
+
+  defp end_to_end_sae(params, training, evaluation, activations) do
+    end_to_end =
+      if File.exists?(@end_to_end_sae_path) do
+        Checkpoint.load(@end_to_end_sae_path)
+      else
+        info("Training the end to end SAE...")
+        config = %SAE.Config{batch_size: 128}
+        sentences = Dataset.build(Enum.take(training.trees, @training_sentence_count))
+        {sae, history} = SAE.train_end_to_end(config, params, sentences)
+        report = SAE.report(sae, config.active_count, params, evaluation, activations)
+        end_to_end = %{config: config, sae: sae, report: report, history: history}
+        Checkpoint.save(end_to_end, @end_to_end_sae_path)
+        end_to_end
+      end
+
+    %{report: report, history: history} = end_to_end
+
+    info(
+      "End to end SAE: KL curve " <>
+        Enum.map_join(Enum.take_every(history, 10), " ", &format(&1.loss, 3))
+    )
+
+    info(
+      "  #{format(report.variance_explained * 100, 1)}% of variance explained, " <>
+        "#{format(report.loss_recovered * 100, 1)}% of loss recovered, " <>
+        "#{report.dead_count} dead, #{report.dense_count} dense"
+    )
+
+    end_to_end
   end
 
   defp describe(grade),

@@ -395,3 +395,57 @@ An earlier run selected 55 "fragments" by precision for plural alone,
 which swept in features about other things (such as the word `they`).
 Fragments are now features with plural among their top three labels,
 which gives the 17 counted before.
+
+## End to end SAE: does training on behavior make a better knob? (2026-10-31)
+
+Steering showed that the 512 feature SAE's plural feature is a sharp
+detector (precision 0.99) but a bad knob: flipping every probe cost 2.65
+nats of damage, against 0.09 for neuron 74. The guess: that SAE learned
+to copy the neurons' numbers, not what they do. So we trained a second
+512 feature SAE end to end (Braun et al., 2024). It has the same width,
+8 active features, seed and training sentences, but its loss is how far
+the model's next word predictions move when it is spliced in (KL
+divergence), not reconstruction error.
+
+**Speaker's prediction:** it beats the current SAE.
+
+**What it learned:**
+
+| | reconstruction SAE | end to end SAE |
+| --- | --- | --- |
+| variance of the neurons explained | 98.9% (first run) | 3.4% |
+| model loss recovered when spliced in | 100.0% | 100.0% |
+| dead features | 31 of 512 | 76 of 512 |
+
+It rebuilds almost none of the neurons' numbers and loses none of the
+model's predictions. That is not a contradiction. The neurons reach the
+rest of the model only through `weight2`, a 128 × 32 matrix, so at most 32
+of the 128 directions in neuron space can change anything downstream.
+The other 96 or more are invisible to the model. A reconstruction SAE
+spends effort rebuilding them. The end to end SAE learned to ignore
+them.
+
+**Steering, best plural feature (feature 29 again, precision 0.94,
+recall 0.27):**
+
+| push | flip rate | damage (nats) |
+| --- | --- | --- |
+| 0.5 | 0.18 | 0.16 |
+| 1 | 0.86 | 0.84 |
+| 2 | 1.00 | 3.00 |
+
+Full flip at a push of 2 costs 3.00 nats, against 2.65 for the
+reconstruction SAE's feature 29, 0.23 for the narrow SAE's feature and
+0.09 for neuron 74. **Prediction wrong: it is slightly worse, not better.**
+It even has the same index. Both SAEs start from the same random decoder,
+so the plural feature grew from the same starting slot.
+
+**What this says:** training on behavior changed what the SAE rebuilds,
+but not what its plural feature is. It is still a detector that fires on
+some plural subjects, with recall 0.27. Pushing its direction alone
+changes more than agreement. End to end training asks for features that
+*together* preserve the model's behavior. It never asks for any single
+feature, pushed alone and far past its natural size, to change one thing.
+"Good detector" and "good knob" are different properties, and changing
+the SAE's objective did not bring them together. Neuron 74 remains the
+best knob.
