@@ -140,8 +140,15 @@ defmodule Interpretability.Model do
   nats. `opts` pass through to `forward/3`.
   """
   defn loss(params, batch, opts \\ []) do
-    log_probabilities = log_softmax(forward(params, batch.tokens, opts))
-    loss_from(log_probabilities, batch)
+    loss_from(log_probabilities(params, batch.tokens, opts), batch)
+  end
+
+  @doc """
+  `forward/3` turned into log probabilities of every next word: batch ×
+  context × vocabulary. `opts` pass through to `forward/3`.
+  """
+  defn log_probabilities(params, tokens, opts \\ []) do
+    log_softmax(forward(params, tokens, opts))
   end
 
   @doc """
