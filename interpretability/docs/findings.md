@@ -418,14 +418,8 @@ divergence), not reconstruction error.
 | dead features | 31 of 512 | 76 of 512 |
 
 It rebuilds almost none of the neurons' numbers and loses none of the
-model's predictions. Part of the reason: the neurons reach the rest of
-the model only through `weight2`, a 128 × 32 matrix, so 96 of the 128
-directions in neuron space change nothing downstream. But that is only
-part of it (see the correction below): those 96 directions hold 39% of
-the neurons' variance, not 96.6%. The rest of what the end to end SAE
-gets away with not rebuilding is unexplained. Untested candidates are
-that RMSNorm throws away overall size and softmax ignores a shift added
-to every word's score.
+model's predictions. Where the error goes is traced in "Following the
+end to end SAE's error through the model" below.
 
 **Steering, best plural feature (feature 29 again, precision 0.94,
 recall 0.27):**
@@ -491,3 +485,33 @@ directions the model cannot see. Full flip points come from the push
 grid (0.25, 0.5, 1, 2, 4), so the SAE rows are coarse: the old SAE's
 feature flipped 94% at a push of 1, writing about half as much, for
 0.78 nats.
+
+### Following the end to end SAE's error through the model (2026-11-02)
+
+How can an SAE rebuild 3.4% of the neurons and lose none of the
+predictions? We followed its error (reconstruction minus real neurons)
+through each stage of the forward pass, on the same 15,827 evaluation
+positions as the 3.4%, with a throwaway script and a hand written
+forward pass that matches `Model.forward` exactly. The speaker made no
+prediction. Mine was that impossible words would swallow most of it,
+then the residual stream.
+
+| Stage | Error relative to the signal | What happened |
+| --- | --- | --- |
+| Neurons | 0.98 | The error is as large as the neurons' own variation |
+| Past `weight2` | 0.46 | 73% of the error is in directions the model cannot see |
+| Added to the residual stream | 0.38 | Barely shrinks: the MLP is 93% of the output vector, so the residual is not what hides it |
+| Past RMSNorm | 0.22 | 58% of the visible error only changed the output's overall size, which RMSNorm throws away |
+| Word scores | 0.15 | 11.5% of the change is the same on every word, which softmax ignores |
+| Weighted by probability | spread 0.24 to 0.003 | 98% of what is left lands on words the model gives under 1%, which hold 0.7% of the probability |
+| KL divergence | 0.001 nats | Matches half the weighted spread, the small change approximation |
+
+Three stages do almost all of the hiding: invisible directions, overall
+size (RMSNorm) and impossible words. Two hypotheses failed: the residual
+stream does not drown the MLP out, and the same shift on every word is
+minor. I had dismissed RMSNorm before measuring, which was wrong.
+
+What it means for interpretation: training on behavior lets an SAE be
+sloppy anywhere the model's next word does not care, including about
+what the neurons compute for words it would never say. Its features
+describe what matters to the output, not what the neurons hold.
