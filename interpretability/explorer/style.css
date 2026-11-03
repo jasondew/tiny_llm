@@ -1,0 +1,219 @@
+:root {
+  --paper: #f2f4f6;
+  --surface: #ffffff;
+  --ink: #18202b;
+  --muted: #5a6575;
+  --rule: #d3dae2;
+  --signal: #2546d0;
+  --signal-faint: rgba(37, 70, 208, 0.12);
+  --error: #a8231c;
+  --display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --body: "Atkinson Hyperlegible", system-ui, sans-serif;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #12171e;
+    --surface: #1a212b;
+    --ink: #e7ebf0;
+    --muted: #9aa5b4;
+    --rule: #2a3340;
+    --signal: #7d98ff;
+    --signal-faint: rgba(125, 152, 255, 0.16);
+    --error: #ff8a80;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 17px/1.5 var(--body);
+}
+
+main {
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+h1 {
+  font: 700 clamp(1.6rem, 5vw, 2.4rem)/1.1 var(--display);
+  margin: 0 0 0.5rem;
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  font: 700 1.05rem/1.3 var(--display);
+  margin: 0 0 0.75rem;
+}
+
+.lede { color: var(--muted); max-width: 40rem; margin: 0 0 1.5rem; }
+
+button, input { font: inherit; color: inherit; }
+
+button {
+  min-height: 2.75rem;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+}
+
+button:focus-visible, input:focus-visible {
+  outline: 3px solid var(--signal);
+  outline-offset: 2px;
+}
+
+label { display: block; font-weight: 700; margin-bottom: 0.35rem; }
+
+.input-row { display: flex; gap: 0.5rem; }
+
+.input-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+.input-row button { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+.message { min-height: 1.5rem; margin: 0.4rem 0; color: var(--error); }
+
+.message.loading { color: var(--muted); }
+
+.vocabulary { margin-top: 0.75rem; color: var(--muted); }
+.vocabulary summary { min-height: 2.75rem; display: flex; align-items: center; cursor: pointer; }
+.vocabulary p { margin: 0.25rem 0 0; }
+
+.presets { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.presets button { font-size: 0.95rem; text-align: left; }
+
+/* The sentence is the page's one loud element: big words, each sitting
+   on a bar that rises with the selected unit's activation. */
+.sentence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  margin: 2rem 0 1.5rem;
+}
+
+.word {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 2.75rem;
+  min-height: 5.5rem;
+  padding: 0.25rem 0.4rem 0;
+  border: 2px solid transparent;
+  background: none;
+  border-radius: 0.5rem;
+  font: 700 clamp(1.6rem, 6.5vw, 2.6rem)/1.1 var(--display);
+}
+
+.word[aria-pressed="true"] { border-color: var(--ink); }
+
+.word .bar {
+  display: block;
+  height: 1.6rem;
+  margin-top: 0.3rem;
+  background: var(--signal-faint);
+  border-radius: 0.2rem;
+  overflow: hidden;
+  position: relative;
+}
+
+.word .bar span {
+  position: absolute;
+  inset: auto 0 0 0;
+  background: var(--signal);
+  transition: height 180ms ease-out;
+}
+
+.columns { display: grid; gap: 1rem; }
+
+@media (min-width: 52rem) {
+  .columns { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.predictions { list-style: none; margin: 0 0 1.5rem; padding: 0; }
+
+.predictions li {
+  display: grid;
+  grid-template-columns: 6rem 1fr 3.5rem;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+}
+
+.predictions .meter { height: 0.6rem; background: var(--signal-faint); border-radius: 0.3rem; overflow: hidden; }
+.predictions .meter span { display: block; height: 100%; background: var(--ink); }
+.predictions .percent { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+
+.units-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+.units-heading h2 { margin: 0; }
+
+.toggle { display: flex; }
+.toggle button { border-radius: 0; }
+.toggle button:first-child { border-radius: 0.5rem 0 0 0.5rem; }
+.toggle button:last-child { border-radius: 0 0.5rem 0.5rem 0; border-left: none; }
+.toggle button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+.units { list-style: none; margin: 0; padding: 0; }
+
+.unit {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.1rem 0.75rem;
+  text-align: left;
+  border: none;
+  border-top: 1px solid var(--rule);
+  border-radius: 0;
+  background: none;
+  padding: 0.55rem 0.25rem;
+}
+
+.unit[aria-pressed="true"] { background: var(--signal-faint); }
+.unit .name { font-weight: 700; }
+.unit .label { grid-column: 1 / -1; }
+.unit .scores { color: var(--muted); font-size: 0.9rem; grid-column: 1 / -1; }
+.unit .strength { width: 5rem; height: 0.6rem; align-self: center; background: var(--signal-faint); border-radius: 0.3rem; overflow: hidden; }
+.unit .strength span { display: block; height: 100%; background: var(--signal); }
+
+.empty { color: var(--muted); }
+
+.detail h2 { font-size: 1.35rem; }
+.detail .labels { margin: 0 0 1rem; padding-left: 1.2rem; }
+.detail .labels li { margin-bottom: 0.25rem; }
+.detail .scores { color: var(--muted); }
+.examples { list-style: none; margin: 0; padding: 0; }
+.examples li { padding: 0.35rem 0; border-top: 1px solid var(--rule); }
+.examples .after { color: var(--muted); }
+.examples strong { color: var(--signal); }
+
+.steering { margin-top: 1rem; }
+.steering .toggle { flex-wrap: wrap; margin: 0.75rem 0 1rem; }
+.steering input[type="range"] { width: 100%; min-height: 2.75rem; accent-color: var(--signal); }
+.verdict { font: 700 1.2rem/1.3 var(--display); margin: 0.5rem 0 0.75rem; }
+
+footer { margin-top: 2rem; color: var(--muted); font-size: 0.9rem; max-width: 40rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .word .bar span { transition: none; }
+}

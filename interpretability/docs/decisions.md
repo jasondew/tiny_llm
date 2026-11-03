@@ -111,3 +111,33 @@ training. Activations start at position 1, because `<start>` is the same
 vector in every sentence. The neuron against feature comparison leaves
 out labels true for more than half of all words, which any always on unit
 wins and no sparse feature can.
+
+## Browser explorer (2026-11-02)
+
+- **Plain JS forward pass, checked against Nx.** `explorer/test/parity.test.js`
+  runs the page's forward pass on the exported weights for the cold open
+  and 20 evaluation sentences. Tolerance is 1e-4 absolute; the largest
+  logit difference measured is 2.4e-6. A forward pass takes about 0.5 ms
+  in Node.
+- **Weights ship as raw float32**, with a JSON manifest, because decimal
+  numbers would round them and the parity test would compare two
+  different models.
+- **The explorer lives in `tiny_llm/interpretability/explorer/`**, next
+  to the Nx code its parity test needs. The deck will copy it into its
+  own static files.
+- **Run the JS tests with `node --test 'explorer/test/*.test.js'`.** On
+  Node 23, `node --test explorer/test/` does not find the test files.
+- **The steering panel shows verb shares, not just the margin.** The
+  margin can turn positive while the model moves to number free words,
+  so the page also shows the probability on plural and singular present
+  verbs. See findings.md, "a flip is not a plural".
+- **"Dead" means dead on the evaluation sentences, not dead.** 31 of the
+  512 features never fire there, but typed sentences switch some of them
+  on (feature 42 fires at "mouse" in "who behind mouse behind"), because
+  TopK always keeps 8 features active. The page labels such a feature
+  "No label: it never fired on the evaluation sentences" and scales its
+  bars by the sentence instead of an evaluation peak. An earlier ruling
+  said its panel was unreachable; the final review showed that was wrong.
+- **Examples are only words where the unit fired.** A unit that fired on
+  fewer than 10 evaluation words used to be padded with words where it
+  did not fire at all.

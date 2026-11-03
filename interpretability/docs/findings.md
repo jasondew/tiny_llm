@@ -515,3 +515,33 @@ What it means for interpretation: training on behavior lets an SAE be
 sloppy anywhere the model's next word does not care, including about
 what the neurons compute for words it would never say. Its features
 describe what matters to the output, not what the neurons hold.
+
+## Steering, looked at in the explorer: a flip is not a plural (2026-11-02)
+
+Building the explorer's steering panel showed what the margin hides.
+The margin (best plural present verb minus best singular, the number
+behind every flip rate above) turns positive when singular verbs
+collapse, whether or not plural verbs become likely. Where the
+probability goes after `the llama who chases the dogs`, from the
+page's forward pass, which matches Nx to 2.4e-6:
+
+| Direction | Push | Plural present | Singular present | Past tense | who / that |
+| --- | --- | --- | --- | --- | --- |
+| none | 0 | 0.5% | 62.2% | 29.1% | 7.8% |
+| mean difference | 1 | **86.7%** | 0.0% | 12.9% | 0.3% |
+| mean difference | 2 | **88.6%** | 0.0% | 10.9% | 0.0% |
+| neuron 74 | 1 | 3.6% | 0.6% | 52.8% | 40.3% |
+| neuron 74 | 2 | 12.4% | 0.0% | 43.3% | 36.7% |
+| SAE feature 29 | 1 | 17.4% | 1.2% | 80.2% | 1.0% |
+| SAE feature 29 | 2 | 38.3% | 0.2% | 61.1% | 0.3% |
+
+Only the mean difference makes the model *say* plural verbs. Neuron 74
+and SAE feature 29 mostly push it to words that carry no number: past
+tense verbs, and for neuron 74, "who". They switch singular off rather
+than plural on. Neuron 74's low damage was measured only on words whose
+next word is not a verb, so it never saw this.
+
+This undercuts "neuron 74 is the best knob" from the steering section.
+Under the flip rate and damage as defined, it is; as a plural switch, the
+mean difference is the only candidate that works. This is one sentence,
+and the other 5,411 probes have not been measured this way yet.

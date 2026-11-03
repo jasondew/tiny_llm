@@ -1,0 +1,1 @@
+{"active_count":8,"tensors":[{"name":"decoder","offset":0,"shape":[512,128]},{"name":"decoder_bias","offset":65536,"shape":[128]},{"name":"encoder","offset":65664,"shape":[128,512]},{"name":"encoder_bias","offset":131200,"shape":[512]}]}
