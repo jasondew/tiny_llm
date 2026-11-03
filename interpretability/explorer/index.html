@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Llama grammar explorer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>where the llama keeps its grammar</h1>
+      <p class="lede">Tap a word to see what the model expects next, and which of its units are firing. Tap a unit to see what it is about.</p>
+    </header>
+
+    <form id="sentence-form" autocomplete="off">
+      <label for="sentence-input">Sentence</label>
+      <div class="input-row">
+        <input id="sentence-input" type="text" spellcheck="false" autocapitalize="none">
+        <button type="submit">Read it</button>
+      </div>
+      <p id="sentence-message" class="message" role="status"></p>
+      <div id="presets" class="presets" aria-label="Example sentences"></div>
+    </form>
+
+    <section id="sentence" class="sentence" aria-label="The sentence, word by word"></section>
+
+    <div class="columns">
+      <section class="panel" aria-labelledby="prediction-heading">
+        <h2 id="prediction-heading">Next word</h2>
+        <ol id="predictions" class="predictions"></ol>
+
+        <div class="units-heading">
+          <h2 id="units-heading">Firing here</h2>
+          <div class="toggle" role="group" aria-label="Which units to show">
+            <button type="button" data-kind="features" aria-pressed="true">SAE features</button>
+            <button type="button" data-kind="neurons" aria-pressed="false">Neurons</button>
+          </div>
+        </div>
+        <ul id="units" class="units" aria-labelledby="units-heading"></ul>
+      </section>
+
+      <section id="detail" class="panel detail" aria-live="polite"></section>
+    </div>
+
+    <footer>
+      <p>The model runs in this page: 70 words, one layer, 128 neurons, and a 512 feature sparse autoencoder. Labels come from the grammar the sentences were generated from; the model never saw them.</p>
+    </footer>
+  </main>
+</body>
+</html>
