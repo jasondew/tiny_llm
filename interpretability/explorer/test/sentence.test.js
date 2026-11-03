@@ -42,3 +42,16 @@ test("at most 19 words fit", () => {
 test("an empty sentence asks for one", () => {
   assert.deepEqual(read("   "), { ok: false, message: "Type a sentence, or pick one below." });
 });
+
+test("the words a viewer can type leave out the start token and the full stop", async () => {
+  const { typeableWords } = await import("../js/sentence.js");
+  const words = typeableWords(vocabulary, startToken);
+  assert.equal(words.length, 68);
+  assert.equal(words.includes(startToken), false);
+  assert.equal(words.includes("."), false);
+  assert.ok(words.includes("llama"));
+});
+
+test("an unknown word message points at the word list", () => {
+  assert.match(read("the cat runs").message, /runs.*words it knows/);
+});

@@ -63,6 +63,26 @@ defmodule Interpretability.ExportTest do
       assert hd(live["examples"])["words"] |> Enum.all?(&is_binary/1)
     end
 
+    test "a unit that fires on fewer words than asked lists only those words" do
+      Grammar.seed(15)
+      dataset = Dataset.build(Grammar.trees(50))
+      activations = Activations.collect(Model.init(%Model.Config{}), dataset)
+      {rows, _width} = Nx.shape(activations.hidden)
+
+      column =
+        Nx.indexed_put(
+          Nx.broadcast(Nx.tensor(0.0, type: :f32), {rows}),
+          Nx.tensor([[2], [7]]),
+          Nx.tensor([3.0, 5.0])
+        )
+
+      hidden = Nx.put_slice(activations.hidden, [0, 3], Nx.reshape(column, {rows, 1}))
+      activations = %{activations | hidden: hidden}
+      units = Export.units(activations, dataset, Scoring.score(hidden, activations.labels), 10)
+
+      assert Enum.map(Enum.at(units, 3)["examples"], & &1["activation"]) == [5.0, 3.0]
+    end
+
     test "the whole export encodes as JSON", %{units: units} do
       {manifest, _binary} = Export.weights(%{a: Nx.tensor([1.0])})
       assert is_binary(JSON.encode!(units))

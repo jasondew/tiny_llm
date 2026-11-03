@@ -81,6 +81,9 @@ defmodule Interpretability.Export do
   defp examples(activations, dataset, score, count) do
     activations
     |> Activations.top_examples(dataset, score.unit, count)
+    # A unit that fired on fewer than `count` words gets padded with
+    # words where it did not fire at all; those are not examples.
+    |> Enum.filter(&(&1.activation > 0))
     |> Enum.map(fn example ->
       %{
         "words" => example.words,

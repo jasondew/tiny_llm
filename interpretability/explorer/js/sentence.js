@@ -13,7 +13,10 @@ export function parse(text, vocabulary, startToken, contextLength) {
 
   const unknown = [...new Set(words.filter((word) => word === startToken || !vocabulary.includes(word)))];
   if (unknown.length > 0) {
-    return { ok: false, message: `The model doesn't know: ${unknown.join(", ")}` };
+    return {
+      ok: false,
+      message: `The model doesn't know: ${unknown.join(", ")}. The words it knows are listed below.`,
+    };
   }
 
   if (words.length > room) {
@@ -21,4 +24,10 @@ export function parse(text, vocabulary, startToken, contextLength) {
   }
 
   return { ok: true, words, ids: [startToken, ...words].map((word) => vocabulary.indexOf(word)) };
+}
+
+// Every word someone can type: the vocabulary without the start token,
+// which the page adds itself, and the full stop, which typing strips.
+export function typeableWords(vocabulary, startToken) {
+  return vocabulary.filter((word) => word !== startToken && word !== ".");
 }

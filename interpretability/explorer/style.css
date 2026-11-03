@@ -88,6 +88,12 @@ label { display: block; font-weight: 700; margin-bottom: 0.35rem; }
 
 .message { min-height: 1.5rem; margin: 0.4rem 0; color: var(--error); }
 
+.message.loading { color: var(--muted); }
+
+.vocabulary { margin-top: 0.75rem; color: var(--muted); }
+.vocabulary summary { min-height: 2.75rem; display: flex; align-items: center; cursor: pointer; }
+.vocabulary p { margin: 0.25rem 0 0; }
+
 .presets { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .presets button { font-size: 0.95rem; text-align: left; }
 

@@ -131,6 +131,13 @@ wins and no sparse feature can.
   margin can turn positive while the model moves to number free words,
   so the page also shows the probability on plural and singular present
   verbs. See findings.md, "a flip is not a plural".
-- **A dead feature's panel is unreachable from the page**, since a unit
-  that never fires never appears in the "firing here" list. The "never
-  fires" message stays for safety.
+- **"Dead" means dead on the evaluation sentences, not dead.** 31 of the
+  512 features never fire there, but typed sentences switch some of them
+  on (feature 42 fires at "mouse" in "who behind mouse behind"), because
+  TopK always keeps 8 features active. The page labels such a feature
+  "No label: it never fired on the evaluation sentences" and scales its
+  bars by the sentence instead of an evaluation peak. An earlier ruling
+  said its panel was unreachable; the final review showed that was wrong.
+- **Examples are only words where the unit fired.** A unit that fired on
+  fewer than 10 evaluation words used to be padded with words where it
+  did not fire at all.

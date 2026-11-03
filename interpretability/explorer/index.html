@@ -21,10 +21,14 @@
       <label for="sentence-input">Sentence</label>
       <div class="input-row">
         <input id="sentence-input" type="text" spellcheck="false" autocapitalize="none">
-        <button type="submit">Read it</button>
+        <button type="submit" disabled>Read it</button>
       </div>
-      <p id="sentence-message" class="message" role="status"></p>
+      <p id="sentence-message" class="message loading" role="status">Loading the model…</p>
       <div id="presets" class="presets" aria-label="Example sentences"></div>
+      <details class="vocabulary">
+        <summary>Words the model knows</summary>
+        <p id="vocabulary-list"></p>
+      </details>
     </form>
 
     <section id="sentence" class="sentence" aria-label="The sentence, word by word"></section>

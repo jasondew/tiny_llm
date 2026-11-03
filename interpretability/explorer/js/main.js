@@ -5,7 +5,8 @@
 import { loadTensors } from "./tensors.js";
 import { forward } from "./model.js";
 import { encode } from "./sae.js";
-import { parse } from "./sentence.js";
+import { parse, typeableWords } from "./sentence.js";
+import { describeUnit } from "./units.js";
 import { margin, shares } from "./steering.js";
 
 const presets = [
@@ -72,9 +73,13 @@ function unitValues(position) {
   return state.kind === "features" ? state.run.features[position] : state.run.neurons[position];
 }
 
+// A unit that never fired on the evaluation sentences has no peak, so its
+// bars are scaled by the most it reaches in this sentence instead.
 function peak(unit) {
-  const examples = units()[unit].examples;
-  return examples.length > 0 ? examples[0].activation : 1;
+  const { peak: evaluationPeak } = describeUnit(units()[unit]);
+  if (evaluationPeak !== null) return evaluationPeak;
+  const sentencePeak = Math.max(...state.run.words.map((_word, position) => unitValues(position)[unit]));
+  return sentencePeak > 0 ? sentencePeak : 1;
 }
 
 function run(words, ids) {
@@ -210,7 +215,7 @@ function drawUnits() {
 
   list.replaceChildren(
     ...active.map(({ index, value }) => {
-      const best = units()[index].top[0];
+      const description = describeUnit(units()[index]);
       return element("li", {}, [
         element(
           "button",
@@ -229,12 +234,9 @@ function drawUnits() {
           },
           [
             element("span", { class: "name", text: unitName(index) }),
-            meter("strength", value / peak(index)),
-            element("span", { class: "label", text: best.label }),
-            element("span", {
-              class: "scores",
-              text: `precision ${best.precision.toFixed(2)}, recall ${best.recall.toFixed(2)}`,
-            }),
+            description.peak === null ? element("span") : meter("strength", value / description.peak),
+            element("span", { class: "label", text: description.label }),
+            element("span", { class: "scores", text: description.scores }),
           ],
         ),
       ]);
@@ -288,6 +290,13 @@ function draw() {
   drawSteering();
 }
 
+// Until the model has loaded, the form must not submit itself, which
+// would reload the page and start the download again.
+document.querySelector("#sentence-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (data) read(document.querySelector("#sentence-input").value);
+});
+
 async function start() {
   const [model, sae, neurons, features, steering] = await Promise.all([
     fetchTensors("model"),
@@ -304,10 +313,10 @@ async function start() {
   });
 
   const input = document.querySelector("#sentence-input");
-  document.querySelector("#sentence-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    read(input.value);
-  });
+  document.querySelector("#sentence-form button[type=submit]").disabled = false;
+  document.querySelector("#sentence-message").classList.remove("loading");
+  document.querySelector("#vocabulary-list").textContent =
+    typeableWords(model.manifest.vocabulary, model.manifest.start_token).join(", ");
 
   document.querySelector("#presets").replaceChildren(
     ...presets.map((sentence) =>
