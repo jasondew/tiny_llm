@@ -418,12 +418,14 @@ divergence), not reconstruction error.
 | dead features | 31 of 512 | 76 of 512 |
 
 It rebuilds almost none of the neurons' numbers and loses none of the
-model's predictions. That is not a contradiction. The neurons reach the
-rest of the model only through `weight2`, a 128 × 32 matrix, so at most 32
-of the 128 directions in neuron space can change anything downstream.
-The other 96 or more are invisible to the model. A reconstruction SAE
-spends effort rebuilding them. The end to end SAE learned to ignore
-them.
+model's predictions. Part of the reason: the neurons reach the rest of
+the model only through `weight2`, a 128 × 32 matrix, so 96 of the 128
+directions in neuron space change nothing downstream. But that is only
+part of it (see the correction below): those 96 directions hold 39% of
+the neurons' variance, not 96.6%. The rest of what the end to end SAE
+gets away with not rebuilding is unexplained. Untested candidates are
+that RMSNorm throws away overall size and softmax ignores a shift added
+to every word's score.
 
 **Steering, best plural feature (feature 29 again, precision 0.94,
 recall 0.27):**
@@ -449,3 +451,43 @@ feature, pushed alone and far past its natural size, to change one thing.
 "Good detector" and "good knob" are different properties, and changing
 the SAE's objective did not bring them together. Neuron 74 remains the
 best knob.
+
+### Is `weight2` mis-trained? (2026-11-02)
+
+The speaker asked whether 96 invisible directions mean `weight2` is
+badly trained. No. Any 128 × 32 matrix has at least 96 directions it
+sends to zero. That comes from the MLP's shape (widen from 32 to 128,
+ReLU, narrow back to 32), which every transformer shares. Measured with
+throwaway scripts, not committed:
+
+- **All 32 outputs are used.** `weight2`'s singular values run from 8.33
+  down to 0.85, with none near zero.
+- **Training puts the neurons' activity where the model can see it.**
+  61.2% of the neurons' variance lies in the 32 directions `weight2`
+  passes on, against 24.2% for a random 32 of the 128.
+- **Correction.** The first version of this section said the end to end
+  SAE explained only 3.4% because the other directions are invisible.
+  The invisible directions hold 39% of the variance, so they explain
+  only part of it.
+
+**Steering in the units the model receives.** Push size was measured in
+neuron space, where part of every push is invisible. Measured instead
+by what each push writes past `weight2`, against the 63.8 the MLP
+writes at an average word:
+
+| Direction | Share of length visible | Written at full flip | Damage |
+| --- | --- | --- | --- |
+| Mean difference | 67% | 66.3 (1.04×) | 0.456 |
+| Neuron 74 | 22% | 66.3 (1.04×) | 0.094 |
+| Narrow SAE feature 28 | 40% | 71.9 (1.13×) | 0.228 |
+| Old SAE feature 29 | 55% | 106.2 (1.66×) | 2.654 |
+| End to end SAE feature 29 | 53% | 118.5 (1.86×) | 3.000 |
+
+Neuron 74 and the mean difference write exactly as much at a full flip,
+yet neuron 74 does a fifth of the damage, so its advantage is *which way*
+it pushes, not how hard. And the earlier framing "neuron 74 pushed 3.5×
+past its natural max" overstates it: 78% of that push lands in
+directions the model cannot see. Full flip points come from the push
+grid (0.25, 0.5, 1, 2, 4), so the SAE rows are coarse: the old SAE's
+feature flipped 94% at a push of 1, writing about half as much, for
+0.78 nats.
