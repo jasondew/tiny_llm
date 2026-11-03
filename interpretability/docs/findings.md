@@ -395,3 +395,123 @@ An earlier run selected 55 "fragments" by precision for plural alone,
 which swept in features about other things (such as the word `they`).
 Fragments are now features with plural among their top three labels,
 which gives the 17 counted before.
+
+## End to end SAE: does training on behavior make a better knob? (2026-10-31)
+
+Steering showed that the 512 feature SAE's plural feature is a sharp
+detector (precision 0.99) but a bad knob: flipping every probe cost 2.65
+nats of damage, against 0.09 for neuron 74. The guess: that SAE learned
+to copy the neurons' numbers, not what they do. So we trained a second
+512 feature SAE end to end (Braun et al., 2024). It has the same width,
+8 active features, seed and training sentences, but its loss is how far
+the model's next word predictions move when it is spliced in (KL
+divergence), not reconstruction error.
+
+**Speaker's prediction:** it beats the current SAE.
+
+**What it learned:**
+
+| | reconstruction SAE | end to end SAE |
+| --- | --- | --- |
+| variance of the neurons explained | 98.9% (first run) | 3.4% |
+| model loss recovered when spliced in | 100.0% | 100.0% |
+| dead features | 31 of 512 | 76 of 512 |
+
+It rebuilds almost none of the neurons' numbers and loses none of the
+model's predictions. Where the error goes is traced in "Following the
+end to end SAE's error through the model" below.
+
+**Steering, best plural feature (feature 29 again, precision 0.94,
+recall 0.27):**
+
+| push | flip rate | damage (nats) |
+| --- | --- | --- |
+| 0.5 | 0.18 | 0.16 |
+| 1 | 0.86 | 0.84 |
+| 2 | 1.00 | 3.00 |
+
+Full flip at a push of 2 costs 3.00 nats, against 2.65 for the
+reconstruction SAE's feature 29, 0.23 for the narrow SAE's feature and
+0.09 for neuron 74. **Prediction wrong: it is slightly worse, not better.**
+It even has the same index. Both SAEs start from the same random decoder,
+so the plural feature grew from the same starting slot.
+
+**What this says:** training on behavior changed what the SAE rebuilds,
+but not what its plural feature is. It is still a detector that fires on
+some plural subjects, with recall 0.27. Pushing its direction alone
+changes more than agreement. End to end training asks for features that
+*together* preserve the model's behavior. It never asks for any single
+feature, pushed alone and far past its natural size, to change one thing.
+"Good detector" and "good knob" are different properties, and changing
+the SAE's objective did not bring them together. Neuron 74 remains the
+best knob.
+
+### Is `weight2` mis-trained? (2026-11-02)
+
+The speaker asked whether 96 invisible directions mean `weight2` is
+badly trained. No. Any 128 × 32 matrix has at least 96 directions it
+sends to zero. That comes from the MLP's shape (widen from 32 to 128,
+ReLU, narrow back to 32), which every transformer shares. Measured with
+throwaway scripts, not committed:
+
+- **All 32 outputs are used.** `weight2`'s singular values run from 8.33
+  down to 0.85, with none near zero.
+- **Training puts the neurons' activity where the model can see it.**
+  61.2% of the neurons' variance lies in the 32 directions `weight2`
+  passes on, against 24.2% for a random 32 of the 128.
+- **Correction.** The first version of this section said the end to end
+  SAE explained only 3.4% because the other directions are invisible.
+  The invisible directions hold 39% of the variance, so they explain
+  only part of it.
+
+**Steering in the units the model receives.** Push size was measured in
+neuron space, where part of every push is invisible. Measured instead
+by what each push writes past `weight2`, against the 63.8 the MLP
+writes at an average word:
+
+| Direction | Share of length visible | Written at full flip | Damage |
+| --- | --- | --- | --- |
+| Mean difference | 67% | 66.3 (1.04×) | 0.456 |
+| Neuron 74 | 22% | 66.3 (1.04×) | 0.094 |
+| Narrow SAE feature 28 | 40% | 71.9 (1.13×) | 0.228 |
+| Old SAE feature 29 | 55% | 106.2 (1.66×) | 2.654 |
+| End to end SAE feature 29 | 53% | 118.5 (1.86×) | 3.000 |
+
+Neuron 74 and the mean difference write exactly as much at a full flip,
+yet neuron 74 does a fifth of the damage, so its advantage is *which way*
+it pushes, not how hard. And the earlier framing "neuron 74 pushed 3.5×
+past its natural max" overstates it: 78% of that push lands in
+directions the model cannot see. Full flip points come from the push
+grid (0.25, 0.5, 1, 2, 4), so the SAE rows are coarse: the old SAE's
+feature flipped 94% at a push of 1, writing about half as much, for
+0.78 nats.
+
+### Following the end to end SAE's error through the model (2026-11-02)
+
+How can an SAE rebuild 3.4% of the neurons and lose none of the
+predictions? We followed its error (reconstruction minus real neurons)
+through each stage of the forward pass, on the same 15,827 evaluation
+positions as the 3.4%, with a throwaway script and a hand written
+forward pass that matches `Model.forward` exactly. The speaker made no
+prediction. Mine was that impossible words would swallow most of it,
+then the residual stream.
+
+| Stage | Error relative to the signal | What happened |
+| --- | --- | --- |
+| Neurons | 0.98 | The error is as large as the neurons' own variation |
+| Past `weight2` | 0.46 | 73% of the error is in directions the model cannot see |
+| Added to the residual stream | 0.38 | Barely shrinks: what the MLP writes is 0.93 times the size of the whole output, so the residual is not what hides it |
+| Past RMSNorm | 0.22 | 58% of the visible error only changed the output's overall size, which RMSNorm throws away |
+| Word scores | 0.15 | 11.5% of the change is the same on every word, which softmax ignores |
+| Weighted by probability | spread 0.24 to 0.003 | 98% of what is left lands on words the model gives under 1%, which hold 0.7% of the probability |
+| KL divergence | 0.001 nats | Matches half the weighted spread, the small change approximation |
+
+Three stages do almost all of the hiding: invisible directions, overall
+size (RMSNorm) and impossible words. Two hypotheses failed: the residual
+stream does not drown the MLP out, and the same shift on every word is
+minor. I had dismissed RMSNorm before measuring, which was wrong.
+
+What it means for interpretation: training on behavior lets an SAE be
+sloppy anywhere the model's next word does not care, including about
+what the neurons compute for words it would never say. Its features
+describe what matters to the output, not what the neurons hold.

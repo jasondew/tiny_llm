@@ -35,6 +35,18 @@ defmodule Interpretability.SAE do
   top 8 and zeroes the rest (the TopK variant, from later work), so the
   sparsity is a number you can say on a slide.
 
+  ## End to end: keep what the model does, not what it says
+
+  `train/2` rewards an SAE for rebuilding the neurons' numbers. That is
+  not quite what we want: some of those numbers matter to the model's
+  predictions and some barely do, and a reconstruction loss treats them
+  all alike. `train_end_to_end/3` trains on what matters instead (Braun
+  et al., "Identifying Functionally Important Features with End-to-End
+  Sparse Dictionary Learning", 2024): splice the reconstruction into the
+  model, and score how far its next word predictions move, as a KL
+  divergence. The SAE is then free to rebuild the numbers badly, as long
+  as the model cannot tell.
+
   ## Checking the SAE did not cheat
 
   A good reconstruction is not enough. `report/5` also splices the
@@ -131,6 +143,26 @@ defmodule Interpretability.SAE do
   end
 
   @doc """
+  How far the model's next word predictions move when the SAE's
+  reconstruction replaces the neurons: the KL divergence from the
+  model's own predictions to the spliced ones, in nats, averaged over the
+  real positions. `batch` holds `:tokens` and `:mask` like a training
+  batch, plus the model's parameters as `:model`.
+  """
+  defn end_to_end_loss(sae, batch, opts \\ []) do
+    active_count = opts[:active_count]
+    original = Model.log_probabilities(batch.model, batch.tokens)
+
+    spliced =
+      Model.log_probabilities(batch.model, batch.tokens,
+        edit_hidden: &reconstruct(sae, &1, active_count: active_count)
+      )
+
+    divergence = Nx.sum(Nx.exp(original) * (original - spliced), axes: [-1])
+    Nx.sum(divergence * batch.mask) / Nx.sum(batch.mask)
+  end
+
+  @doc """
   Reconstruction error as a share of the input's variance: 0 is perfect,
   1 is no better than always predicting the batch mean.
   """
@@ -166,6 +198,32 @@ defmodule Interpretability.SAE do
       init(config, activations),
       batches(activations, config.batch_size, config.seed),
       fn sae, batch -> loss(sae, batch.input, active_count: active_count) end,
+      steps: config.steps,
+      learning_rate: config.learning_rate,
+      after_step: &normalize_decoder/1
+    )
+  end
+
+  @doc """
+  Trains an SAE end to end on `model_params`: on `end_to_end_loss/3`
+  over batches of `dataset`'s sentences, so `config.batch_size` counts
+  sentences here, not words.
+  """
+  @spec train_end_to_end(Config.t(), Model.params(), Dataset.t()) ::
+          {t(), [Trainer.history_point()]}
+  def train_end_to_end(%Config{} = config, model_params, dataset) do
+    activations = Activations.collect(model_params, dataset).hidden
+    active_count = config.active_count
+
+    batches =
+      dataset
+      |> Dataset.batches(config.batch_size, config.seed)
+      |> Stream.map(&Map.put(&1, :model, model_params))
+
+    Trainer.run(
+      init(config, activations),
+      batches,
+      fn sae, batch -> end_to_end_loss(sae, batch, active_count: active_count) end,
       steps: config.steps,
       learning_rate: config.learning_rate,
       after_step: &normalize_decoder/1
