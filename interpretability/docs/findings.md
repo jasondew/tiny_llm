@@ -500,7 +500,7 @@ then the residual stream.
 | --- | --- | --- |
 | Neurons | 0.98 | The error is as large as the neurons' own variation |
 | Past `weight2` | 0.46 | 73% of the error is in directions the model cannot see |
-| Added to the residual stream | 0.38 | Barely shrinks: the MLP is 93% of the output vector, so the residual is not what hides it |
+| Added to the residual stream | 0.38 | Barely shrinks: what the MLP writes is 0.93 times the size of the whole output, so the residual is not what hides it |
 | Past RMSNorm | 0.22 | 58% of the visible error only changed the output's overall size, which RMSNorm throws away |
 | Word scores | 0.15 | 11.5% of the change is the same on every word, which softmax ignores |
 | Weighted by probability | spread 0.24 to 0.003 | 98% of what is left lands on words the model gives under 1%, which hold 0.7% of the probability |
