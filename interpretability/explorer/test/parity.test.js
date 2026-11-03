@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { loadTensors } from "../js/tensors.js";
 import { forward } from "../js/model.js";
 import { encode } from "../js/sae.js";
+import { margin } from "../js/steering.js";
 
 const tolerance = 1e-4;
 const here = new URL(".", import.meta.url);
@@ -23,7 +24,9 @@ function load(name) {
 const model = load("model");
 const sae = load("sae");
 const activeCount = sae.manifest.active_count;
-const fixtures = JSON.parse(readFileSync(new URL("fixtures.json", here))).sentences;
+const fixtureFile = JSON.parse(readFileSync(new URL("fixtures.json", here)));
+const fixtures = fixtureFile.sentences;
+const steering = JSON.parse(readFileSync(new URL("../data/steering.json", here)));
 
 function largestDifference(computed, expectedRows) {
   const width = expectedRows[0].length;
@@ -111,4 +114,28 @@ test("a forward pass takes under 50 ms", () => {
   const average = (performance.now() - began) / 100;
   console.log(`average forward pass: ${average.toFixed(2)} ms`);
   assert.ok(average < 50, `average ${average} ms`);
+});
+
+test("steering margins match Nx within 1e-3", () => {
+  const coldOpen = fixtures[0].ids;
+  for (const expected of fixtureFile.margins) {
+    const direction = steering.directions.find(({ name }) => name === expected.direction);
+    const strength = expected.multiple * steering.word_length;
+    const computed = margin(model, coldOpen, Float32Array.from(direction.vector), strength, steering);
+    assert.ok(
+      Math.abs(computed - expected.margin) <= 1e-3,
+      `${expected.direction} at ${expected.multiple}: ${computed} against ${expected.margin}`,
+    );
+  }
+  const unpushed = fixtureFile.margins.find(({ multiple }) => multiple === 0);
+  assert.equal(unpushed.margin.toFixed(3), "-5.023");
+});
+
+test("verb shares: an unpushed cold open favours singular present verbs", async () => {
+  const { shares } = await import("../js/steering.js");
+  const direction = Float32Array.from(steering.directions[0].vector);
+  const unpushed = shares(model, fixtures[0].ids, direction, 0, steering);
+  assert.ok(unpushed.singular > 0.5 && unpushed.plural < 0.05, JSON.stringify(unpushed));
+  const pushed = shares(model, fixtures[0].ids, direction, steering.word_length, steering);
+  assert.ok(pushed.plural > 0.5 && pushed.singular < 0.05, JSON.stringify(pushed));
 });

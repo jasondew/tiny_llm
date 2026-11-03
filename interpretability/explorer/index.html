@@ -47,6 +47,17 @@
       <section id="detail" class="panel detail" aria-live="polite"></section>
     </div>
 
+    <section class="panel steering" aria-labelledby="steering-heading">
+      <h2 id="steering-heading">Push toward plural</h2>
+      <p class="scores">Add one direction to the neurons at every word, then read what the model expects after the last word. A push of 1 is as large as everything the neurons normally hold at a word.</p>
+      <div id="steering-directions" class="toggle" role="group" aria-label="Direction to push along"></div>
+      <label for="steering-push">Push: <span id="steering-push-value">0</span></label>
+      <input id="steering-push" type="range" min="0" max="4" step="0.25" value="0">
+      <p id="steering-verdict" class="verdict" aria-live="polite"></p>
+      <p id="steering-margin" class="scores"></p>
+      <ol id="steering-predictions" class="predictions"></ol>
+    </section>
+
     <footer>
       <p>The model runs in this page: 70 words, one layer, 128 neurons, and a 512 feature sparse autoencoder. Labels come from the grammar the sentences were generated from; the model never saw them.</p>
     </footer>

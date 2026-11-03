@@ -10,9 +10,14 @@ defmodule Mix.Tasks.Interp.Export do
   - `neurons.json` and `features.json`: what each unit is about, and the
     evaluation words it fired on most strongly
 
+  - `steering.json`: three plural directions to push along (the mean
+    difference, the best neuron and the best SAE feature), the push unit,
+    and the present tense verbs the agreement margin compares
+
   It also writes `explorer/test/fixtures.json`: the cold open and the
   first 20 evaluation sentences, with the logits, neurons and active SAE
-  features Nx computes for them. The explorer's parity test checks the
+  features Nx computes for them, and the cold open's agreement margin
+  under each steering direction at pushes 0, 1 and 2. The explorer's parity test checks the
   page's JavaScript forward pass against these.
 
       mix interp.export
@@ -28,8 +33,10 @@ defmodule Mix.Tasks.Interp.Export do
   alias Interpretability.Export
   alias Interpretability.Grammar
   alias Interpretability.Model
+  alias Interpretability.Probes
   alias Interpretability.SAE
   alias Interpretability.Scoring
+  alias Interpretability.Steering
   alias Interpretability.Vocab
 
   @model_path "priv/checkpoints/model.etf"
@@ -38,6 +45,9 @@ defmodule Mix.Tasks.Interp.Export do
   @fixtures_path "explorer/test/fixtures.json"
   @fixture_sentence_count 20
   @cold_open ~w(the llama who chases the dogs)
+  @plural {:agreement_number, :plural}
+  @singular {:agreement_number, :singular}
+  @fixture_multiples [0.0, 1.0, 2.0]
   @example_count 10
   @rmsnorm_epsilon 1.0e-6
 
@@ -90,11 +100,59 @@ defmodule Mix.Tasks.Interp.Export do
       ]
 
     fixtures = Enum.map(sentences, &fixture(&1, params, sae, sae_config.active_count))
-    File.write!(@fixtures_path, JSON.encode!(%{"sentences" => fixtures}))
+    {steering, margins} = steering(params, activations, features, sae)
+    write_json("steering.json", steering)
+    File.write!(@fixtures_path, JSON.encode!(%{"sentences" => fixtures, "margins" => margins}))
     Mix.shell().info("Wrote #{@fixtures_path}")
   end
 
   ## PRIVATE FUNCTIONS
+
+  defp steering(params, activations, features, sae) do
+    best_neuron = Scoring.by_label(activations.hidden, activations.labels)[@plural]
+    best_feature = Scoring.by_label(features, activations.labels)[@plural]
+
+    word_length =
+      activations.hidden
+      |> Nx.pow(2)
+      |> Nx.sum(axes: [1])
+      |> Nx.sqrt()
+      |> Nx.mean()
+      |> Nx.to_number()
+
+    directions = [
+      {"mean difference", "average plural subject neurons minus singular",
+       Steering.mean_difference(activations, @plural, @singular)},
+      {"neuron #{best_neuron.unit}", "the neuron that best matches plural agreement",
+       Steering.neuron(best_neuron.unit, Nx.axis_size(activations.hidden, 1))},
+      {"feature #{best_feature.unit}", "the SAE feature that best matches plural agreement",
+       Steering.features(sae, [best_feature.unit])}
+    ]
+
+    {plural_verbs, singular_verbs} =
+      Enum.split_with(Probes.present_verbs(), &(elem(&1, 1) == :plural))
+
+    steering = %{
+      "word_length" => word_length,
+      "plural_verbs" => Enum.map(plural_verbs, &elem(&1, 0)),
+      "singular_verbs" => Enum.map(singular_verbs, &elem(&1, 0)),
+      "directions" =>
+        Enum.map(directions, fn {name, description, direction} ->
+          %{"name" => name, "description" => description, "vector" => Nx.to_list(direction)}
+        end)
+    }
+
+    margins =
+      for {name, _description, direction} <- directions, multiple <- @fixture_multiples do
+        %{
+          "direction" => name,
+          "multiple" => multiple,
+          "margin" => Steering.margin(params, @cold_open, direction, multiple * word_length)
+        }
+      end
+
+    {steering, margins}
+  end
 
   defp fixture(words, params, sae, active_count) do
     context_length = Nx.axis_size(params.positions, 0)

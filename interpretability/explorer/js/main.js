@@ -6,6 +6,7 @@ import { loadTensors } from "./tensors.js";
 import { forward } from "./model.js";
 import { encode } from "./sae.js";
 import { parse } from "./sentence.js";
+import { margin, shares } from "./steering.js";
 
 const presets = [
   "the llama who chases the dogs",
@@ -15,7 +16,7 @@ const presets = [
 const neuronListLength = 12;
 const predictionCount = 5;
 
-const state = { kind: "features", run: null, position: 0, unit: null };
+const state = { kind: "features", run: null, position: 0, unit: null, direction: 1, push: 0 };
 let data;
 
 async function fetchJson(name) {
@@ -91,7 +92,7 @@ function run(words, ids) {
     features.push(encode(data.sae.tensors, row, data.sae.manifest.active_count));
     predictions.push(softmax(Array.from(logits.subarray(position * vocabularySize, (position + 1) * vocabularySize))));
   }
-  return { words, neurons, features, predictions };
+  return { words, ids, neurons, features, predictions };
 }
 
 function strongestUnit(position) {
@@ -135,24 +136,58 @@ function drawSentence() {
   );
 }
 
-function drawPredictions() {
+function predictionItems(probabilities) {
   const vocabulary = data.model.manifest.vocabulary;
-  const probabilities = state.run.predictions[state.position];
-  const ranked = probabilities
+  return probabilities
     .map((probability, id) => ({ word: vocabulary[id], probability }))
     .sort((first, second) => second.probability - first.probability)
-    .slice(0, predictionCount);
-
-  document.querySelector("#prediction-heading").textContent = `After “${state.run.words[state.position]}”, the model expects`;
-  document.querySelector("#predictions").replaceChildren(
-    ...ranked.map(({ word, probability }) =>
+    .slice(0, predictionCount)
+    .map(({ word, probability }) =>
       element("li", {}, [
         element("span", { text: word }),
         meter("meter", probability),
         element("span", { class: "percent", text: `${(probability * 100).toFixed(1)}%` }),
       ]),
+    );
+}
+
+function drawPredictions() {
+  document.querySelector("#prediction-heading").textContent = `After “${state.run.words[state.position]}”, the model expects`;
+  document.querySelector("#predictions").replaceChildren(...predictionItems(state.run.predictions[state.position]));
+}
+
+function drawSteering() {
+  const { directions, word_length: wordLength } = data.steering;
+  const direction = Float32Array.from(directions[state.direction].vector);
+  const strength = state.push * wordLength;
+  const ids = state.run.ids;
+  const lastWord = state.run.words[state.run.words.length - 1];
+
+  document.querySelector("#steering-directions").replaceChildren(
+    ...directions.map(({ name, description }, index) =>
+      element("button", {
+        type: "button",
+        text: name,
+        title: description,
+        "aria-pressed": String(index === state.direction),
+        onclick: () => { state.direction = index; drawSteering(); },
+      }),
     ),
   );
+  document.querySelector("#steering-push-value").textContent = state.push.toFixed(2);
+
+  const difference = margin(data.model, ids, direction, strength, data.steering);
+  const { plural, singular } = shares(data.model, ids, direction, strength, data.steering);
+  const percent = (value) => `${(value * 100).toFixed(1)}%`;
+  document.querySelector("#steering-verdict").textContent =
+    `After “${lastWord}”: plural present verbs ${percent(plural)}, singular ${percent(singular)}.`;
+  document.querySelector("#steering-margin").textContent =
+    `Between the best present tense verbs, plural ${difference > 0 ? "leads" : "trails"} by ${Math.abs(difference).toFixed(2)} in score. Watch the rest of the list: a push can drown out singular verbs without making plural ones likely.`;
+
+  const { logits } = forward(data.model, ids, direction.map((value) => value * strength));
+  const vocabularySize = data.model.manifest.vocabulary.length;
+  const last = Array.from(logits.subarray((ids.length - 1) * vocabularySize, ids.length * vocabularySize));
+  document.querySelector("#steering-predictions").replaceChildren(...predictionItems(softmax(last)));
 }
 
 function drawUnits() {
@@ -250,16 +285,23 @@ function draw() {
   drawPredictions();
   drawUnits();
   drawDetail();
+  drawSteering();
 }
 
 async function start() {
-  const [model, sae, neurons, features] = await Promise.all([
+  const [model, sae, neurons, features, steering] = await Promise.all([
     fetchTensors("model"),
     fetchTensors("sae"),
     fetchJson("neurons.json"),
     fetchJson("features.json"),
+    fetchJson("steering.json"),
   ]);
-  data = { model, sae, neurons, features };
+  data = { model, sae, neurons, features, steering };
+
+  document.querySelector("#steering-push").addEventListener("input", (event) => {
+    state.push = Number(event.target.value);
+    drawSteering();
+  });
 
   const input = document.querySelector("#sentence-input");
   document.querySelector("#sentence-form").addEventListener("submit", (event) => {
