@@ -127,3 +127,10 @@ wins and no sparse feature can.
   own static files.
 - **Run the JS tests with `node --test 'explorer/test/*.test.js'`.** On
   Node 23, `node --test explorer/test/` does not find the test files.
+- **The steering panel shows verb shares, not just the margin.** The
+  margin can turn positive while the model moves to number free words,
+  so the page also shows the probability on plural and singular present
+  verbs. See findings.md, "a flip is not a plural".
+- **A dead feature's panel is unreachable from the page**, since a unit
+  that never fires never appears in the "firing here" list. The "never
+  fires" message stays for safety.
